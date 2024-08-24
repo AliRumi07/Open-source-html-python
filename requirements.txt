@@ -3,7 +3,4 @@ pandas
 flask
 websockets
 pandas-ta
-binance-futures-connector
 requests
-websocket-client
-pycryptodome
