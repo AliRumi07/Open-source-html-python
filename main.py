@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import pandas_ta as ta
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import deque
 import asyncio
 import websockets
@@ -9,33 +9,27 @@ import json
 from flask import Flask, render_template_string
 from threading import Thread
 import time
-import requests
+import aiohttp
 
 # Customizable variables
 Timeframe = '1m'
 portfolio_balance = 1000
 trade_amount = 100
 leverage_x = 10
-take_profit = 0.002
-stop_loss = 0.002
+take_profit = 0.004
 fee_rate = 0.001
-ema_period_5 = 5
-ema_period_15 = 15
-rsi_period = 3
-rsi_overbought = 70
-rsi_oversold = 30
+ema_period_15 = 9
 
 # Add the Pair variable
 Pairs = [
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "TONUSDT", "ADAUSDT", "TRXUSDT", "AVAXUSDT"
 ]
+
 app = Flask(__name__)
 
 def calculate_indicators(prices):
     df = pd.DataFrame(prices, columns=['close'])
-    df['ema_5'] = ta.ema(df['close'], length=ema_period_5)
     df['ema_15'] = ta.ema(df['close'], length=ema_period_15)
-    df['rsi'] = ta.rsi(df['close'], length=rsi_period)
     return df.iloc[-1]
 
 class TradingStrategy:
@@ -96,15 +90,10 @@ class TradingStrategy:
 
         if len(self.close_prices[pair]) == ema_period_15:
             indicators = calculate_indicators(list(self.close_prices[pair]))
-            ema_5 = indicators['ema_5']
             ema_15 = indicators['ema_15']
-            rsi = indicators['rsi']
 
             if self.positions[pair] is None and is_closed:
-                if self.check_long_entry(pair, ema_5, ema_15, rsi):
-                    self.pending_long[pair] = True
-                elif self.check_short_entry(pair, ema_5, ema_15, rsi):
-                    self.pending_short[pair] = True
+                self.check_entry_conditions(pair, ema_15)
 
             if self.positions[pair] is not None:
                 self.check_exit_conditions(pair, timestamp, high_price, low_price)
@@ -117,20 +106,35 @@ class TradingStrategy:
                     self.open_short_position(pair, timestamp, open_price)
                     self.pending_short[pair] = False
 
-    def check_long_entry(self, pair, ema_5, ema_15, rsi):
-        if ema_5 < ema_15 and rsi < rsi_oversold:
-            return True
-        return False
+    def check_entry_conditions(self, pair, ema_15):
+        if len(self.candle_data[pair]) < 3:
+            return
 
-    def check_short_entry(self, pair, ema_5, ema_15, rsi):
-        if ema_5 > ema_15 and rsi > rsi_overbought:
-            return True
-        return False
+        candle_1, candle_2, candle_3 = list(self.candle_data[pair])[-3:]
+
+        # Long condition
+        if (candle_1['close'] > ema_15 and
+            candle_2['close'] < candle_2['open'] and  # Red candle
+            candle_2['low'] > ema_15 and
+            candle_3['close'] > candle_3['open'] and  # Green candle
+            candle_3['low'] > ema_15 and
+            candle_3['close'] > candle_2['high']):
+            self.pending_long[pair] = True
+            self.stop_loss_prices[pair] = candle_2['low']
+
+        # Short condition
+        elif (candle_1['close'] < ema_15 and
+              candle_2['close'] > candle_2['open'] and  # Green candle
+              candle_2['high'] < ema_15 and
+              candle_3['close'] < candle_3['open'] and  # Red candle
+              candle_3['high'] < ema_15 and
+              candle_3['close'] < candle_2['low']):
+            self.pending_short[pair] = True
+            self.stop_loss_prices[pair] = candle_2['high']
 
     def open_long_position(self, pair, timestamp, price):
         self.positions[pair] = "Long"
         self.entry_prices[pair] = price
-        self.stop_loss_prices[pair] = self.entry_prices[pair] * (1 - stop_loss)
         self.take_profit_prices[pair] = self.entry_prices[pair] * (1 + take_profit)
         self.pair_stats[pair]['Longs'] += 1
         self.update_stats(pair, price)
@@ -138,7 +142,6 @@ class TradingStrategy:
     def open_short_position(self, pair, timestamp, price):
         self.positions[pair] = "Short"
         self.entry_prices[pair] = price
-        self.stop_loss_prices[pair] = self.entry_prices[pair] * (1 + stop_loss)
         self.take_profit_prices[pair] = self.entry_prices[pair] * (1 - take_profit)
         self.pair_stats[pair]['Shorts'] += 1
         self.update_stats(pair, price)
@@ -277,62 +280,62 @@ def index():
     '''
     return render_template_string(template, pair_stats=strategy.pair_stats, overall_stats=strategy.overall_stats)
 
-def fetch_initial_data(pair, interval, limit):
-    base_url = "https://fapi.binance.com"
-    endpoint = f"/fapi/v1/klines"
-    url = f"{base_url}{endpoint}?symbol={pair}&interval={interval}&limit={limit}"
-    
-    response = requests.get(url)
-    data = response.json()
-    
-    return [{'open_time': item[0],
-             'open': float(item[1]),
-             'high': float(item[2]),
-             'low': float(item[3]),
-             'close': float(item[4]),
-             'volume': float(item[5]),
-             'close_time': item[6]} for item in data]
+async def fetch_historical_data(session, pair):
+    url = f"https://fapi.binance.com/fapi/v1/klines"
+    params = {
+        "symbol": pair,
+        "interval": Timeframe,
+        "limit": ema_period_15
+    }
+    async with session.get(url, params=params) as response:
+        if response.status == 200:
+            data = await response.json()
+            return pair, [float(candle[4]) for candle in data]  # Closing prices
+        else:
+            print(f"Failed to fetch historical data for {pair}")
+            return pair, []
+
+async def initialize_data():
+    async with aiohttp.ClientSession() as session:
+        tasks = [fetch_historical_data(session, pair) for pair in Pairs]
+        results = await asyncio.gather(*tasks)
+
+        for pair, prices in results:
+            strategy.close_prices[pair].extend(prices)
+            for price in prices[-3:]:
+                strategy.candle_data[pair].append({'open': price, 'high': price, 'low': price, 'close': price})
 
 async def connect_to_binance_futures():
     uri = f"wss://fstream.binance.com/stream?streams={'/'.join([pair.lower() + '@kline_' + Timeframe for pair in Pairs])}"
 
-    # Fetch initial data
-    for pair in Pairs:
-        initial_data = fetch_initial_data(pair, Timeframe, 14)
-        for candle in initial_data:
-            strategy.process_price(pair, datetime.fromtimestamp(candle['open_time'] / 1000),
-                                   candle['open'], candle['high'], candle['low'], candle['close'],
-                                   candle['volume'], True)
+    while True:
+        try:
+            async with websockets.connect(uri) as websocket:
+                print("Connected to Binance Futures WebSocket")
 
-    async with websockets.connect(uri) as websocket:
-        print("Connected to Binance Futures WebSocket")
+                last_ping_time = time.time()
 
-        last_ping_time = time.time()
+                while True:
+                    try:
+                        message = await asyncio.wait_for(websocket.recv(), timeout=1)
+                        process_message(json.loads(message))
 
-        while True:
-            try:
-                message = await asyncio.wait_for(websocket.recv(), timeout=1)
-                process_message(json.loads(message))
+                        current_time = time.time()
+                        if current_time - last_ping_time > 60:
+                            await websocket.ping()
+                            last_ping_time = current_time
+                            print("Ping sent to keep connection alive")
 
-                current_time = time.time()
-                if current_time - last_ping_time > 60:
-                    await websocket.ping()
-                    last_ping_time = current_time
-                    print("Ping sent to keep connection alive")
+                    except asyncio.TimeoutError:
+                        current_time = time.time()
+                        if current_time - last_ping_time > 60:
+                            await websocket.ping()
+                            last_ping_time = current_time
+                            print("Ping sent to keep connection alive")
 
-            except asyncio.TimeoutError:
-                current_time = time.time()
-                if current_time - last_ping_time > 60:
-                    await websocket.ping()
-                    last_ping_time = current_time
-                    print("Ping sent to keep connection alive")
-
-            except websockets.exceptions.ConnectionClosed:
-                print("WebSocket connection closed. Attempting to reconnect...")
-                break
-
-    await asyncio.sleep(5)
-    await connect_to_binance_futures()
+        except websockets.exceptions.ConnectionClosed:
+            print("WebSocket connection closed. Attempting to reconnect...")
+            await asyncio.sleep(5)  # Wait for 5 seconds before reconnecting
 
 def process_message(message):
     stream = message['stream']
@@ -353,7 +356,12 @@ def process_message(message):
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
-if __name__ == "__main__":
+async def main():
+    await initialize_data()
     flask_thread = Thread(target=run_flask)
     flask_thread.start()
-    asyncio.get_event_loop().run_until_complete(connect_to_binance_futures())
+    await connect_to_binance_futures()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+        
