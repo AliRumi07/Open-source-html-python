@@ -29,7 +29,6 @@ rsi_oversold = 30
 Pairs = [
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "TONUSDT", "ADAUSDT", "TRXUSDT", "AVAXUSDT"
 ]
-
 app = Flask(__name__)
 
 def calculate_indicators(prices):
@@ -119,14 +118,12 @@ class TradingStrategy:
                     self.pending_short[pair] = False
 
     def check_long_entry(self, pair, ema_5, ema_15, rsi):
-        # Reversed strategy: Long when EMA5 > EMA15 and RSI < oversold
-        if ema_5 > ema_15 and rsi < rsi_oversold:
+        if ema_5 < ema_15 and rsi < rsi_oversold:
             return True
         return False
 
     def check_short_entry(self, pair, ema_5, ema_15, rsi):
-        # Reversed strategy: Short when EMA5 < EMA15 and RSI > overbought
-        if ema_5 < ema_15 and rsi > rsi_overbought:
+        if ema_5 > ema_15 and rsi > rsi_overbought:
             return True
         return False
 
