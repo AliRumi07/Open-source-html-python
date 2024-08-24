@@ -12,12 +12,12 @@ import time
 import requests
 
 # Customizable variables
-Timeframe = '5m'
+Timeframe = '1m'
 portfolio_balance = 1000
 trade_amount = 100
 leverage_x = 10
-take_profit = 0.004
-stop_loss = 0.004
+take_profit = 0.002
+stop_loss = 0.002
 fee_rate = 0.001
 ema_period_5 = 5
 ema_period_15 = 15
