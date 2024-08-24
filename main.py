@@ -16,7 +16,7 @@ Timeframe = '1m'
 portfolio_balance = 1000
 trade_amount = 100
 leverage_x = 10
-take_profit = 0.004
+take_profit = 0.003
 fee_rate = 0.001
 ema_period_15 = 9
 
