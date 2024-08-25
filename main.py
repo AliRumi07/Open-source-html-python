@@ -11,7 +11,7 @@ from threading import Thread
 import aiohttp
 
 # Customizable variables
-Timeframe = '1m'
+Timeframe = '5m'
 portfolio_balance = 100
 trade_amount = 10
 leverage_x = 10
