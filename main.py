@@ -19,9 +19,9 @@ leverage_x = 10
 take_profit = 0.004
 fee_rate = 0.001
 ema_period_15 = 9
-rsi_period = 3  # RSI period
-rsi_overbought = 70  # RSI overbought level
-rsi_oversold = 30  # RSI oversold level
+rsi_period = 5  # RSI period
+rsi_overbought = 60  # RSI overbought level
+rsi_oversold = 40  # RSI oversold level
 
 # Add the Pair variable
 Pairs = [
