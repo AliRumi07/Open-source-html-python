@@ -16,12 +16,9 @@ Timeframe = '1m'
 portfolio_balance = 100
 trade_amount = 10
 leverage_x = 10
-take_profit = 0.004
+take_profit = 0.003
 fee_rate = 0.001
 ema_period_15 = 9
-rsi_period = 5  # RSI period
-rsi_overbought = 60  # RSI overbought level
-rsi_oversold = 40  # RSI oversold level
 
 # Add the Pair variable
 Pairs = [
@@ -33,7 +30,6 @@ app = Flask(__name__)
 def calculate_indicators(prices):
     df = pd.DataFrame(prices, columns=['close'])
     df['ema_15'] = ta.ema(df['close'], length=ema_period_15)
-    df['rsi'] = ta.rsi(df['close'], length=rsi_period)
     return df.iloc[-1]
 
 class TradingStrategy:
@@ -49,7 +45,7 @@ class TradingStrategy:
         self.total_profit_loss = 0
         self.max_drawdown = 0
         self.lowest_balance = portfolio_balance
-        self.close_prices = {pair: deque(maxlen=max(ema_period_15, rsi_period)) for pair in pairs}
+        self.close_prices = {pair: deque(maxlen=ema_period_15) for pair in pairs}
         self.candle_data = {pair: deque(maxlen=3) for pair in pairs}  # Store last 3 candles
         self.pending_long = {pair: False for pair in pairs}
         self.pending_short = {pair: False for pair in pairs}
@@ -92,13 +88,12 @@ class TradingStrategy:
             self.close_prices[pair].append(close_price)
             self.candle_data[pair].append({'open': open_price, 'high': high_price, 'low': low_price, 'close': close_price})
 
-        if len(self.close_prices[pair]) == max(ema_period_15, rsi_period):
+        if len(self.close_prices[pair]) == ema_period_15:
             indicators = calculate_indicators(list(self.close_prices[pair]))
             ema_15 = indicators['ema_15']
-            rsi = indicators['rsi']
 
             if self.positions[pair] is None and is_closed:
-                self.check_entry_conditions(pair, ema_15, rsi)
+                self.check_entry_conditions(pair, ema_15)
 
             if self.positions[pair] is not None:
                 self.check_exit_conditions(pair, timestamp, high_price, low_price)
@@ -111,7 +106,7 @@ class TradingStrategy:
                     self.open_short_position(pair, timestamp, open_price)
                     self.pending_short[pair] = False
 
-    def check_entry_conditions(self, pair, ema_15, rsi):
+    def check_entry_conditions(self, pair, ema_15):
         if len(self.candle_data[pair]) < 3:
             return
 
@@ -123,8 +118,7 @@ class TradingStrategy:
             candle_2['low'] > ema_15 and
             candle_3['close'] > candle_3['open'] and  # Green candle
             candle_3['low'] > ema_15 and
-            candle_3['close'] > candle_2['high'] and
-            rsi < rsi_oversold):  # RSI below 30
+            candle_3['close'] > candle_2['high']):
             self.pending_long[pair] = True
             self.stop_loss_prices[pair] = candle_2['low']
 
@@ -134,8 +128,7 @@ class TradingStrategy:
               candle_2['high'] < ema_15 and
               candle_3['close'] < candle_3['open'] and  # Red candle
               candle_3['high'] < ema_15 and
-              candle_3['close'] < candle_2['low'] and
-              rsi > rsi_overbought):  # RSI above 70
+              candle_3['close'] < candle_2['low']):
             self.pending_short[pair] = True
             self.stop_loss_prices[pair] = candle_2['high']
 
@@ -292,7 +285,7 @@ async def fetch_historical_data(session, pair):
     params = {
         "symbol": pair,
         "interval": Timeframe,
-        "limit": max(ema_period_15, rsi_period)
+        "limit": ema_period_15
     }
     async with session.get(url, params=params) as response:
         if response.status == 200:
@@ -371,3 +364,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+            
