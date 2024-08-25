@@ -149,15 +149,11 @@ class TradingStrategy:
                 self.close_position(pair, timestamp, self.take_profit_prices[pair], True)
             elif low_price <= self.stop_loss_prices[pair]:
                 self.close_position(pair, timestamp, self.stop_loss_prices[pair], False)
-            elif close_price != self.entry_prices[pair]:  # Check if the candle has closed
-                self.close_position(pair, timestamp, close_price, self.pair_stats[pair]['Current P/L'] > 0)
         elif self.positions[pair] == "Short":
             if low_price <= self.take_profit_prices[pair]:
                 self.close_position(pair, timestamp, self.take_profit_prices[pair], True)
             elif high_price >= self.stop_loss_prices[pair]:
                 self.close_position(pair, timestamp, self.stop_loss_prices[pair], False)
-            elif close_price != self.entry_prices[pair]:  # Check if the candle has closed
-                self.close_position(pair, timestamp, close_price, self.pair_stats[pair]['Current P/L'] > 0)
 
     def close_position(self, pair, timestamp, exit_price, is_profit):
         self.total_trades += 1
