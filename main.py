@@ -12,11 +12,11 @@ import aiohttp
 
 # Customizable variables
 Timeframe = '5m'
-portfolio_balance = 1000
-trade_amount = 100
+portfolio_balance = 100
+trade_amount = 10
 leverage_x = 10
-take_profit = 0.004
-stop_loss = 0.004
+take_profit = 0.003
+stop_loss = 0.003
 fee_rate = 0.001
 ema_period_5 = 5
 ema_period_15 = 15
