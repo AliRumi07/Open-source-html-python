@@ -16,10 +16,13 @@ portfolio_balance = 100
 trade_amount = 10
 leverage_x = 10
 take_profit = 0.004
-stop_loss = 0.002
+stop_loss = 0.004
 fee_rate = 0.001
 ema_period_5 = 5
 ema_period_15 = 15
+rsi_period = 3
+rsi_overbought = 80
+rsi_oversold = 20
 
 # Add the Pair variable
 Pairs = [
@@ -32,6 +35,7 @@ def calculate_indicators(prices):
     df = pd.DataFrame(prices, columns=['close'])
     df['ema_5'] = ta.ema(df['close'], length=ema_period_5)
     df['ema_15'] = ta.ema(df['close'], length=ema_period_15)
+    df['rsi'] = ta.rsi(df['close'], length=rsi_period)
     return df
 
 class TradingStrategy:
@@ -49,9 +53,7 @@ class TradingStrategy:
         self.lowest_balance = portfolio_balance
         self.close_prices = {pair: deque(maxlen=ema_period_15) for pair in pairs}
         self.candle_data = {pair: deque(maxlen=3) for pair in pairs}  # Store last 3 candles
-        self.pending_long = {pair: False for pair in pairs}
-        self.pending_short = {pair: False for pair in pairs}
-        self.previous_ema_data = {pair: None for pair in pairs}
+        self.previous_indicators = {pair: None for pair in pairs}
 
         self.pair_stats = {pair: {
             'Price': 0,
@@ -87,39 +89,34 @@ class TradingStrategy:
         else:
             self.pair_stats[pair]['Current P/L'] = 0
 
-        if is_closed:
-            self.close_prices[pair].append(close_price)
-            self.candle_data[pair].append({'open': open_price, 'high': high_price, 'low': low_price, 'close': close_price})
+        self.close_prices[pair].append(close_price)
+        self.candle_data[pair].append({'open': open_price, 'high': high_price, 'low': low_price, 'close': close_price})
 
         if len(self.close_prices[pair]) == ema_period_15:
-            indicators = calculate_indicators(list(self.close_prices[pair]))
-            current_ema_data = indicators.iloc[-1]
+            df = calculate_indicators(list(self.close_prices[pair]))
+            current_indicators = df.iloc[-1]
             
-            if self.previous_ema_data[pair] is not None:
-                if self.positions[pair] is None and is_closed:
-                    if self.check_long_entry(pair, current_ema_data, self.previous_ema_data[pair]):
-                        self.pending_long[pair] = True
-                    elif self.check_short_entry(pair, current_ema_data, self.previous_ema_data[pair]):
-                        self.pending_short[pair] = True
+            if self.previous_indicators[pair] is not None:
+                if self.positions[pair] is None:
+                    if self.check_long_entry(pair, current_indicators, self.previous_indicators[pair]):
+                        self.open_long_position(pair, timestamp, close_price)
+                    elif self.check_short_entry(pair, current_indicators, self.previous_indicators[pair]):
+                        self.open_short_position(pair, timestamp, close_price)
 
-                if self.positions[pair] is not None:
+                else:
                     self.check_exit_conditions(pair, timestamp, high_price, low_price, close_price)
 
-                if self.pending_long[pair] or self.pending_short[pair]:
-                    if self.pending_long[pair]:
-                        self.open_long_position(pair, timestamp, open_price)
-                        self.pending_long[pair] = False
-                    elif self.pending_short[pair]:
-                        self.open_short_position(pair, timestamp, open_price)
-                        self.pending_short[pair] = False
-            
-            self.previous_ema_data[pair] = current_ema_data
+            self.previous_indicators[pair] = current_indicators
 
-    def check_long_entry(self, pair, current_ema_data, previous_ema_data):
-        return current_ema_data['ema_5'] > current_ema_data['ema_15'] and previous_ema_data['ema_5'] <= previous_ema_data['ema_15']
+    def check_long_entry(self, pair, current, previous):
+        return (current['ema_5'] > current['ema_15'] and 
+                previous['ema_5'] <= previous['ema_15'] and 
+                current['rsi'] > rsi_overbought)
 
-    def check_short_entry(self, pair, current_ema_data, previous_ema_data):
-        return current_ema_data['ema_5'] < current_ema_data['ema_15'] and previous_ema_data['ema_5'] >= previous_ema_data['ema_15']
+    def check_short_entry(self, pair, current, previous):
+        return (current['ema_5'] < current['ema_15'] and 
+                previous['ema_5'] >= previous['ema_15'] and 
+                current['rsi'] < rsi_oversold)
 
     def open_long_position(self, pair, timestamp, price):
         self.positions[pair] = "Long"
