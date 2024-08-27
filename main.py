@@ -16,10 +16,10 @@ Timeframe = '5m'
 portfolio_balance = 1000
 trade_amount = 100
 leverage_x = 10
-take_profit = 0.004
+take_profit = 0.005
 stop_loss = 0.004
 fee_rate = 0.001
-ema_period_20 = 20
+ema_period_20 = 14
 rsi_period_5 = 5
 rsi_period_9 = 9
 
@@ -285,7 +285,7 @@ def index():
     '''
     return render_template_string(template, pair_stats=strategy.pair_stats, overall_stats=strategy.overall_stats)
 
-def fetch_historical_data(pair, limit=19):
+def fetch_historical_data(pair, limit=13):
     interval_map = {'1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m', '1h': '1h', '4h': '4h', '1d': '1d'}
     interval = interval_map.get(Timeframe, '5m')
     
