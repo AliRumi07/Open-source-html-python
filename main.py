@@ -9,7 +9,7 @@ import json
 from flask import Flask, render_template_string
 from threading import Thread
 import time
-import aiohttp
+import requests
 
 # Customizable variables
 Timeframe = '5m'
@@ -285,25 +285,23 @@ def index():
     '''
     return render_template_string(template, pair_stats=strategy.pair_stats, overall_stats=strategy.overall_stats)
 
-async def fetch_initial_data(session, pair):
-    url = f"https://fapi.binance.com/fapi/v1/klines"
-    params = {
-        "symbol": pair,
-        "interval": Timeframe,
-        "limit": max(ema_period_20, rsi_period_9)
-    }
-    async with session.get(url, params=params) as response:
-        data = await response.json()
-        return [float(candle[4]) for candle in data]  # Use closing prices
-
-async def initialize_data():
-    async with aiohttp.ClientSession() as session:
-        tasks = [fetch_initial_data(session, pair) for pair in Pairs]
-        results = await asyncio.gather(*tasks)
-        for pair, prices in zip(Pairs, results):
-            strategy.close_prices[pair].extend(prices)
-            for price in prices:
-                strategy.process_price(pair, None, price, price, price, price, 0, True)
+def fetch_historical_data(pair, limit=19):
+    interval_map = {'1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m', '1h': '1h', '4h': '4h', '1d': '1d'}
+    interval = interval_map.get(Timeframe, '5m')
+    
+    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={pair}&interval={interval}&limit={limit}"
+    response = requests.get(url)
+    data = response.json()
+    
+    for candle in data:
+        timestamp = datetime.fromtimestamp(candle[0] / 1000)
+        open_price = float(candle[1])
+        high_price = float(candle[2])
+        low_price = float(candle[3])
+        close_price = float(candle[4])
+        volume = float(candle[5])
+        
+        strategy.process_price(pair, timestamp, open_price, high_price, low_price, close_price, volume, True)
 
 async def connect_to_binance_futures():
     uri = f"wss://fstream.binance.com/stream?streams={'/'.join([pair.lower() + '@kline_' + Timeframe for pair in Pairs])}"
@@ -317,9 +315,11 @@ async def connect_to_binance_futures():
 
                 while True:
                     try:
+                        # Set a timeout for receiving messages
                         message = await asyncio.wait_for(websocket.recv(), timeout=1)
                         process_message(json.loads(message))
 
+                        # Check if it's time to send a ping
                         current_time = time.time()
                         if current_time - last_ping_time > 60:
                             await websocket.ping()
@@ -327,6 +327,8 @@ async def connect_to_binance_futures():
                             print("Ping sent to keep connection alive")
 
                     except asyncio.TimeoutError:
+                        # No message received within the timeout period
+                        # Check if it's time to send a ping
                         current_time = time.time()
                         if current_time - last_ping_time > 60:
                             await websocket.ping()
@@ -356,12 +358,11 @@ def process_message(message):
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
-async def main():
-    await initialize_data()
+if __name__ == "__main__":
+    # Fetch historical data for each pair
+    for pair in Pairs:
+        fetch_historical_data(pair)
+    
     flask_thread = Thread(target=run_flask)
     flask_thread.start()
-    await connect_to_binance_futures()
-
-if __name__ == "__main__":
-    asyncio.run(main())
-      
+    asyncio.get_event_loop().run_until_complete(connect_to_binance_futures())
