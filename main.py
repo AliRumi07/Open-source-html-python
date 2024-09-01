@@ -1,4 +1,6 @@
-from datetime import datetime
+import numpy as np
+import pandas as pd
+from datetime import datetime, timedelta
 from collections import deque
 import asyncio
 import websockets
@@ -6,31 +8,80 @@ import json
 from flask import Flask, render_template_string
 from threading import Thread
 import time
+import requests
 
 # Customizable variables
+Timeframe = '5m'
 portfolio_balance = 1000
 trade_amount = 100
+leverage_x = 10
+take_profit = 0.004
+stop_loss = 0.004
 fee_rate = 0.001
 
+# SuperTrend parameters
+atr_period = 10
+atr_multiplier = 3
+
 # Add the Pair variable
-Pairs = ["BTCUSDT"]
+Pairs = [
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "TONUSDT", "ADAUSDT", "TRXUSDT", "AVAXUSDT"
+]
 
 app = Flask(__name__)
+
+def calculate_supertrend(high, low, close, period=atr_period, multiplier=atr_multiplier):
+    hl2 = (high + low) / 2
+    atr = np.zeros_like(close)
+    atr[period-1] = np.mean(high[:period] - low[:period])
+    for i in range(period, len(close)):
+        atr[i] = (atr[i-1] * (period - 1) + np.max([high[i] - low[i], 
+                                                    abs(high[i] - close[i-1]), 
+                                                    abs(low[i] - close[i-1])])) / period
+    
+    upperband = hl2 + (multiplier * atr)
+    lowerband = hl2 - (multiplier * atr)
+    
+    supertrend = np.zeros_like(close)
+    direction = np.zeros_like(close)
+    
+    for i in range(1, len(close)):
+        if close[i] > upperband[i-1]:
+            supertrend[i] = lowerband[i]
+            direction[i] = 1
+        elif close[i] < lowerband[i-1]:
+            supertrend[i] = upperband[i]
+            direction[i] = -1
+        else:
+            supertrend[i] = supertrend[i-1]
+            direction[i] = direction[i-1]
+            
+            if direction[i] == 1 and lowerband[i] < supertrend[i]:
+                supertrend[i] = lowerband[i]
+            elif direction[i] == -1 and upperband[i] > supertrend[i]:
+                supertrend[i] = upperband[i]
+    
+    return supertrend, direction
 
 class TradingStrategy:
     def __init__(self, pairs):
         self.pairs = pairs
         self.positions = {pair: None for pair in pairs}
         self.entry_prices = {pair: None for pair in pairs}
+        self.stop_loss_prices = {pair: None for pair in pairs}
         self.take_profit_prices = {pair: None for pair in pairs}
         self.total_trades = 0
         self.trades_in_profit = 0
+        self.trades_in_loss = 0
         self.total_profit_loss = 0
         self.max_drawdown = 0
         self.lowest_balance = portfolio_balance
-        self.last_price = {pair: None for pair in pairs}
-        self.next_long_price = {pair: None for pair in pairs}
-        self.next_short_price = {pair: None for pair in pairs}
+        self.candle_data = {pair: {'open': deque(maxlen=atr_period), 
+                                   'high': deque(maxlen=atr_period), 
+                                   'low': deque(maxlen=atr_period), 
+                                   'close': deque(maxlen=atr_period)} for pair in pairs}
+        self.pending_long = {pair: False for pair in pairs}
+        self.pending_short = {pair: False for pair in pairs}
 
         self.pair_stats = {pair: {
             'Price': 0,
@@ -38,6 +89,7 @@ class TradingStrategy:
             'Longs': 0,
             'Shorts': 0,
             'In Profit': 0,
+            'In Loss': 0,
             'Total P/L': 0,
             'Current P/L': 0
         } for pair in pairs}
@@ -47,59 +99,81 @@ class TradingStrategy:
             'Portfolio Balance': portfolio_balance,
             'Total Trades': 0,
             'Trades in Profit': 0,
+            'Trades in Loss': 0,
             'Accuracy': 0,
             'Max Drawdown': 0
         }
 
-    def process_price(self, pair, timestamp, price):
-        self.pair_stats[pair]['Price'] = price
-
-        if self.last_price[pair] is None:
-            self.last_price[pair] = price
-            self.next_long_price[pair] = price - 100
-            self.next_short_price[pair] = price + 100
+    def process_price(self, pair, timestamp, open_price, high_price, low_price, close_price, volume, is_closed):
+        self.pair_stats[pair]['Price'] = close_price
 
         if self.positions[pair] is not None:
             if self.positions[pair] == "Long":
-                current_pl = (price - self.entry_prices[pair]) * (trade_amount / self.entry_prices[pair])
+                current_pl = (close_price - self.entry_prices[pair]) / self.entry_prices[pair] * trade_amount * leverage_x
             else:
-                current_pl = (self.entry_prices[pair] - price) * (trade_amount / self.entry_prices[pair])
-            current_pl -= trade_amount * fee_rate
+                current_pl = (self.entry_prices[pair] - close_price) / self.entry_prices[pair] * trade_amount * leverage_x
+            current_pl -= trade_amount * leverage_x * fee_rate
             self.pair_stats[pair]['Current P/L'] = current_pl
         else:
             self.pair_stats[pair]['Current P/L'] = 0
 
-        if self.positions[pair] is None:
-            if price <= self.next_long_price[pair]:
-                self.open_long_position(pair, timestamp, price)
-            elif price >= self.next_short_price[pair]:
-                self.open_short_position(pair, timestamp, price)
-        else:
-            self.check_exit_conditions(pair, timestamp, price)
+        if is_closed:
+            self.candle_data[pair]['open'].append(open_price)
+            self.candle_data[pair]['high'].append(high_price)
+            self.candle_data[pair]['low'].append(low_price)
+            self.candle_data[pair]['close'].append(close_price)
 
-        self.last_price[pair] = price
+        if len(self.candle_data[pair]['close']) == atr_period:
+            supertrend, direction = calculate_supertrend(
+                np.array(self.candle_data[pair]['high']),
+                np.array(self.candle_data[pair]['low']),
+                np.array(self.candle_data[pair]['close'])
+            )
+
+            if self.positions[pair] is None and is_closed:
+                if direction[-1] == 1:  # SuperTrend gives long signal
+                    self.pending_long[pair] = True
+                elif direction[-1] == -1:  # SuperTrend gives short signal
+                    self.pending_short[pair] = True
+
+            if self.positions[pair] is not None:
+                self.check_exit_conditions(pair, timestamp, high_price, low_price)
+
+            if self.pending_long[pair] or self.pending_short[pair]:
+                if self.pending_long[pair]:
+                    self.open_long_position(pair, timestamp, open_price)
+                    self.pending_long[pair] = False
+                elif self.pending_short[pair]:
+                    self.open_short_position(pair, timestamp, open_price)
+                    self.pending_short[pair] = False
 
     def open_long_position(self, pair, timestamp, price):
         self.positions[pair] = "Long"
         self.entry_prices[pair] = price
-        self.take_profit_prices[pair] = price + 100
+        self.stop_loss_prices[pair] = self.entry_prices[pair] * (1 - stop_loss)
+        self.take_profit_prices[pair] = self.entry_prices[pair] * (1 + take_profit)
         self.pair_stats[pair]['Longs'] += 1
         self.update_stats(pair, price)
 
     def open_short_position(self, pair, timestamp, price):
         self.positions[pair] = "Short"
         self.entry_prices[pair] = price
-        self.take_profit_prices[pair] = price - 100
+        self.stop_loss_prices[pair] = self.entry_prices[pair] * (1 + stop_loss)
+        self.take_profit_prices[pair] = self.entry_prices[pair] * (1 - take_profit)
         self.pair_stats[pair]['Shorts'] += 1
         self.update_stats(pair, price)
 
-    def check_exit_conditions(self, pair, timestamp, price):
+    def check_exit_conditions(self, pair, timestamp, high_price, low_price):
         if self.positions[pair] == "Long":
-            if price >= self.take_profit_prices[pair]:
+            if high_price >= self.take_profit_prices[pair]:
                 self.close_position(pair, timestamp, self.take_profit_prices[pair], True)
+            elif low_price <= self.stop_loss_prices[pair]:
+                self.close_position(pair, timestamp, self.stop_loss_prices[pair], False)
         elif self.positions[pair] == "Short":
-            if price <= self.take_profit_prices[pair]:
+            if low_price <= self.take_profit_prices[pair]:
                 self.close_position(pair, timestamp, self.take_profit_prices[pair], True)
+            elif high_price >= self.stop_loss_prices[pair]:
+                self.close_position(pair, timestamp, self.stop_loss_prices[pair], False)
 
     def close_position(self, pair, timestamp, exit_price, is_profit):
         self.total_trades += 1
@@ -107,13 +181,16 @@ class TradingStrategy:
         if is_profit:
             self.trades_in_profit += 1
             self.pair_stats[pair]['In Profit'] += 1
+        else:
+            self.trades_in_loss += 1
+            self.pair_stats[pair]['In Loss'] += 1
 
         if self.positions[pair] == "Long":
-            profit_loss = (exit_price - self.entry_prices[pair]) * (trade_amount / self.entry_prices[pair])
+            profit_loss = (exit_price - self.entry_prices[pair]) / self.entry_prices[pair] * trade_amount * leverage_x
         else:
-            profit_loss = (self.entry_prices[pair] - exit_price) * (trade_amount / self.entry_prices[pair])
+            profit_loss = (self.entry_prices[pair] - exit_price) / self.entry_prices[pair] * trade_amount * leverage_x
 
-        profit_loss -= trade_amount * fee_rate
+        profit_loss -= trade_amount * leverage_x * fee_rate
         self.total_profit_loss += profit_loss
         self.pair_stats[pair]['Total P/L'] += profit_loss
 
@@ -124,9 +201,8 @@ class TradingStrategy:
 
         self.positions[pair] = None
         self.entry_prices[pair] = None
+        self.stop_loss_prices[pair] = None
         self.take_profit_prices[pair] = None
-        self.next_long_price[pair] = exit_price - 100
-        self.next_short_price[pair] = exit_price + 100
         self.update_stats(pair, exit_price)
 
     def update_stats(self, pair, current_price):
@@ -137,6 +213,7 @@ class TradingStrategy:
         self.overall_stats['Portfolio Balance'] = portfolio_balance + self.total_profit_loss
         self.overall_stats['Total Trades'] = self.total_trades
         self.overall_stats['Trades in Profit'] = self.trades_in_profit
+        self.overall_stats['Trades in Loss'] = self.trades_in_loss
         self.overall_stats['Accuracy'] = (self.trades_in_profit / self.total_trades) * 100 if self.total_trades > 0 else 0
         self.overall_stats['Max Drawdown'] = self.max_drawdown * 100
 
@@ -173,6 +250,7 @@ def index():
                 <th>Longs</th>
                 <th>Shorts</th>
                 <th>In Profit</th>
+                <th>In Loss</th>
                 <th>Total P/L</th>
                 <th>Current P/L</th>
             </tr>
@@ -184,6 +262,7 @@ def index():
                 <td>{{ stats['Longs'] }}</td>
                 <td>{{ stats['Shorts'] }}</td>
                 <td>{{ stats['In Profit'] }}</td>
+                <td>{{ stats['In Loss'] }}</td>
                 <td>${{ "%.2f"|format(stats['Total P/L']) }}</td>
                 <td class="{{ 'positive' if stats['Current P/L'] > 0 else 'negative' if stats['Current P/L'] < 0 else '' }}">
                     ${{ "%.2f"|format(stats['Current P/L']) }}
@@ -218,53 +297,102 @@ def index():
     '''
     return render_template_string(template, pair_stats=strategy.pair_stats, overall_stats=strategy.overall_stats)
 
+def get_initial_data(pair):
+    base_url = "https://api.binance.com/api/v3/klines"
+    interval = Timeframe
+    limit = 9
+    end_time = int(time.time() * 1000)
+    start_time = end_time - (limit * get_interval_milliseconds(interval))
+
+    params = {
+        "symbol": pair,
+        "interval": interval,
+        "startTime": start_time,
+        "endTime": end_time,
+        "limit": limit
+    }
+
+    response = requests.get(base_url, params=params)
+    data = response.json()
+
+    for candle in data:
+        open_time = datetime.fromtimestamp(candle[0] / 1000)
+        open_price = float(candle[1])
+        high_price = float(candle[2])
+        low_price = float(candle[3])
+        close_price = float(candle[4])
+        volume = float(candle[5])
+        is_closed = True
+
+        strategy.process_price(pair, open_time, open_price, high_price, low_price, close_price, volume, is_closed)
+
+def get_interval_milliseconds(interval):
+    units = {
+        'm': 60 * 1000,
+        'h': 60 * 60 * 1000,
+        'd': 24 * 60 * 60 * 1000,
+        'w': 7 * 24 * 60 * 60 * 1000
+    }
+    unit = interval[-1]
+    number = int(interval[:-1])
+    return number * units[unit]
+
 async def connect_to_binance_futures():
-    uri = f"wss://fstream.binance.com/stream?streams={'/'.join([pair.lower() + '@aggTrade' for pair in Pairs])}"
+    uri = f"wss://fstream.binance.com/stream?streams={'/'.join([pair.lower() + '@kline_' + Timeframe for pair in Pairs])}"
 
-    async with websockets.connect(uri) as websocket:
-        print("Connected to Binance Futures WebSocket")
+    while True:
+        try:
+            async with websockets.connect(uri) as websocket:
+                print("Connected to Binance Futures WebSocket")
 
-        last_ping_time = time.time()
+                last_ping_time = time.time()
 
-        while True:
-            try:
-                message = await asyncio.wait_for(websocket.recv(), timeout=1)
-                process_message(json.loads(message))
+                while True:
+                    try:
+                        message = await asyncio.wait_for(websocket.recv(), timeout=1)
+                        process_message(json.loads(message))
 
-                current_time = time.time()
-                if current_time - last_ping_time > 60:
-                    await websocket.ping()
-                    last_ping_time = current_time
-                    print("Ping sent to keep connection alive")
+                        current_time = time.time()
+                        if current_time - last_ping_time > 60:
+                            await websocket.ping()
+                            last_ping_time = current_time
+                            print("Ping sent to keep connection alive")
 
-            except asyncio.TimeoutError:
-                current_time = time.time()
-                if current_time - last_ping_time > 60:
-                    await websocket.ping()
-                    last_ping_time = current_time
-                    print("Ping sent to keep connection alive")
+                    except asyncio.TimeoutError:
+                        current_time = time.time()
+                        if current_time - last_ping_time > 60:
+                            await websocket.ping()
+                            last_ping_time = current_time
+                            print("Ping sent to keep connection alive")
 
-            except websockets.exceptions.ConnectionClosed:
-                print("WebSocket connection closed. Attempting to reconnect...")
-                break
-
-    await asyncio.sleep(5)
-    await connect_to_binance_futures()
+        except websockets.exceptions.ConnectionClosed:
+            print("WebSocket connection closed. Attempting to reconnect...")
+            await asyncio.sleep(5)
 
 def process_message(message):
     stream = message['stream']
     pair = stream.split('@')[0].upper()
     data = message['data']
-    
-    timestamp = datetime.fromtimestamp(data['T'] / 1000)
-    price = float(data['p'])
+    candle = data['k']
 
-    strategy.process_price(pair, timestamp, price)
+    open_time = datetime.fromtimestamp(candle['t'] / 1000)
+    open_price = float(candle['o'])
+    high_price = float(candle['h'])
+    low_price = float(candle['l'])
+    close_price = float(candle['c'])
+    volume = float(candle['v'])
+    is_closed = candle['x']
+
+    strategy.process_price(pair, open_time, open_price, high_price, low_price, close_price, volume, is_closed)
 
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
 if __name__ == "__main__":
+    # Fetch initial data for each pair
+    for pair in Pairs:
+        get_initial_data(pair)
+
     flask_thread = Thread(target=run_flask)
     flask_thread.start()
     asyncio.get_event_loop().run_until_complete(connect_to_binance_futures())
