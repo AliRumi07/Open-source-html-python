@@ -130,22 +130,14 @@ class TradingStrategy:
                 np.array(self.candle_data[pair]['close'])
             )
 
-            if self.positions[pair] is None and is_closed:
+            if self.positions[pair] is None:
                 if direction[-1] == 1:  # SuperTrend gives long signal
-                    self.pending_long[pair] = True
+                    self.open_long_position(pair, timestamp, close_price)
                 elif direction[-1] == -1:  # SuperTrend gives short signal
-                    self.pending_short[pair] = True
+                    self.open_short_position(pair, timestamp, close_price)
 
             if self.positions[pair] is not None:
                 self.check_exit_conditions(pair, timestamp, high_price, low_price)
-
-            if self.pending_long[pair] or self.pending_short[pair]:
-                if self.pending_long[pair]:
-                    self.open_long_position(pair, timestamp, open_price)
-                    self.pending_long[pair] = False
-                elif self.pending_short[pair]:
-                    self.open_short_position(pair, timestamp, open_price)
-                    self.pending_short[pair] = False
 
     def open_long_position(self, pair, timestamp, price):
         self.positions[pair] = "Long"
