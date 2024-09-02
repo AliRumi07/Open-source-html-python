@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from collections import deque
 import asyncio
 import websockets
@@ -8,7 +8,6 @@ import json
 from flask import Flask, render_template_string
 from threading import Thread
 import time
-import requests
 
 # Customizable variables
 Timeframe = '5m'
@@ -130,14 +129,22 @@ class TradingStrategy:
                 np.array(self.candle_data[pair]['close'])
             )
 
-            if self.positions[pair] is None:
+            if self.positions[pair] is None and is_closed:
                 if direction[-1] == 1:  # SuperTrend gives long signal
-                    self.open_long_position(pair, timestamp, close_price)
+                    self.pending_long[pair] = True
                 elif direction[-1] == -1:  # SuperTrend gives short signal
-                    self.open_short_position(pair, timestamp, close_price)
+                    self.pending_short[pair] = True
 
             if self.positions[pair] is not None:
                 self.check_exit_conditions(pair, timestamp, high_price, low_price)
+
+            if self.pending_long[pair] or self.pending_short[pair]:
+                if self.pending_long[pair]:
+                    self.open_long_position(pair, timestamp, open_price)
+                    self.pending_long[pair] = False
+                elif self.pending_short[pair]:
+                    self.open_short_position(pair, timestamp, open_price)
+                    self.pending_short[pair] = False
 
     def open_long_position(self, pair, timestamp, price):
         self.positions[pair] = "Long"
@@ -289,77 +296,38 @@ def index():
     '''
     return render_template_string(template, pair_stats=strategy.pair_stats, overall_stats=strategy.overall_stats)
 
-def get_initial_data(pair):
-    base_url = "https://api.binance.com/api/v3/klines"
-    interval = Timeframe
-    limit = 9
-    end_time = int(time.time() * 1000)
-    start_time = end_time - (limit * get_interval_milliseconds(interval))
-
-    params = {
-        "symbol": pair,
-        "interval": interval,
-        "startTime": start_time,
-        "endTime": end_time,
-        "limit": limit
-    }
-
-    response = requests.get(base_url, params=params)
-    data = response.json()
-
-    for candle in data:
-        open_time = datetime.fromtimestamp(candle[0] / 1000)
-        open_price = float(candle[1])
-        high_price = float(candle[2])
-        low_price = float(candle[3])
-        close_price = float(candle[4])
-        volume = float(candle[5])
-        is_closed = True
-
-        strategy.process_price(pair, open_time, open_price, high_price, low_price, close_price, volume, is_closed)
-
-def get_interval_milliseconds(interval):
-    units = {
-        'm': 60 * 1000,
-        'h': 60 * 60 * 1000,
-        'd': 24 * 60 * 60 * 1000,
-        'w': 7 * 24 * 60 * 60 * 1000
-    }
-    unit = interval[-1]
-    number = int(interval[:-1])
-    return number * units[unit]
-
 async def connect_to_binance_futures():
     uri = f"wss://fstream.binance.com/stream?streams={'/'.join([pair.lower() + '@kline_' + Timeframe for pair in Pairs])}"
 
-    while True:
-        try:
-            async with websockets.connect(uri) as websocket:
-                print("Connected to Binance Futures WebSocket")
+    async with websockets.connect(uri) as websocket:
+        print("Connected to Binance Futures WebSocket")
 
-                last_ping_time = time.time()
+        last_ping_time = time.time()
 
-                while True:
-                    try:
-                        message = await asyncio.wait_for(websocket.recv(), timeout=1)
-                        process_message(json.loads(message))
+        while True:
+            try:
+                message = await asyncio.wait_for(websocket.recv(), timeout=1)
+                process_message(json.loads(message))
 
-                        current_time = time.time()
-                        if current_time - last_ping_time > 60:
-                            await websocket.ping()
-                            last_ping_time = current_time
-                            print("Ping sent to keep connection alive")
+                current_time = time.time()
+                if current_time - last_ping_time > 60:
+                    await websocket.ping()
+                    last_ping_time = current_time
+                    print("Ping sent to keep connection alive")
 
-                    except asyncio.TimeoutError:
-                        current_time = time.time()
-                        if current_time - last_ping_time > 60:
-                            await websocket.ping()
-                            last_ping_time = current_time
-                            print("Ping sent to keep connection alive")
+            except asyncio.TimeoutError:
+                current_time = time.time()
+                if current_time - last_ping_time > 60:
+                    await websocket.ping()
+                    last_ping_time = current_time
+                    print("Ping sent to keep connection alive")
 
-        except websockets.exceptions.ConnectionClosed:
-            print("WebSocket connection closed. Attempting to reconnect...")
-            await asyncio.sleep(5)
+            except websockets.exceptions.ConnectionClosed:
+                print("WebSocket connection closed. Attempting to reconnect...")
+                break
+
+    await asyncio.sleep(5)
+    await connect_to_binance_futures()
 
 def process_message(message):
     stream = message['stream']
@@ -381,10 +349,6 @@ def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
 if __name__ == "__main__":
-    # Fetch initial data for each pair
-    for pair in Pairs:
-        get_initial_data(pair)
-
     flask_thread = Thread(target=run_flask)
     flask_thread.start()
     asyncio.get_event_loop().run_until_complete(connect_to_binance_futures())
