@@ -12,8 +12,8 @@ import time
 
 # Customizable variables
 Timeframe = '1m'
-portfolio_balance = 100
-trade_amount = 10
+portfolio_balance = 1000
+trade_amount = 100
 take_profit = 0.002
 fee_rate = 0.001
 ema_period_5 = 5
@@ -123,8 +123,14 @@ class TradingStrategy:
     def check_take_profit(self, pair, timestamp, current_price):
         if self.positions[pair]["Long"] and current_price >= self.take_profit_prices[pair]["Long"]:
             self.close_position(pair, timestamp, current_price, "Long")
+            self.open_long_position(pair, timestamp, current_price)
+            if self.positions[pair]["Short"]:
+                self.close_position(pair, timestamp, current_price, "Short")
         if self.positions[pair]["Short"] and current_price <= self.take_profit_prices[pair]["Short"]:
             self.close_position(pair, timestamp, current_price, "Short")
+            self.open_short_position(pair, timestamp, current_price)
+            if self.positions[pair]["Long"]:
+                self.close_position(pair, timestamp, current_price, "Long")
 
     def close_position(self, pair, timestamp, exit_price, position_type):
         self.total_trades += 1
