@@ -1,150 +1,169 @@
-import time
-import requests
-import hmac
-import base64
-import json
+import numpy as np
+import pandas as pd
+import pandas_ta as ta
+from datetime import datetime
+from collections import deque
 import asyncio
 import websockets
+import json
+from flask import Flask, render_template_string
+from threading import Thread
+import time
+import subprocess
+import requests
 
 # Customizable variables
-api_key = "bg_d122aaf7588fbf0ef65a61e648809622"
-secret_key = "cf70a251b36ffd63bcda028682c43091502afb4dee270e8000f3754147fa533a"
-passphrase = "strongPASSWORD1"
+Timeframe = '1m'
+ema_period_5 = 5
+ema_period_15 = 15
 
-base_url = "https://api.bitget.com"
-place_order_endpoint = "/api/v2/mix/order/place-order"
-tpsl_order_endpoint = "/api/v2/mix/order/place-tpsl-order"
+# Add the Pair variable
+Pairs = ["BTCUSDT"]
 
-symbol = "SBTCSUSDT"  # You can change this to "SETHSUSDT" or "SXRPSUSDT"
-product_type = "usdt-futures"
-margin_coin = "SUSDT"
-size = "0.001"  # trade size
-leverage = "125"  # leverage
-side = "buy"  # Change to "sell" for a sell order
-trade_side = "open"
-order_type = "market"
+app = Flask(__name__)
 
-ws_uri = "wss://ws.bitget.com/mix/v1/stream"
+def calculate_indicators(prices):
+    df = pd.DataFrame(prices, columns=['close'])
+    df['ema_5'] = ta.ema(df['close'], length=ema_period_5)
+    df['ema_15'] = ta.ema(df['close'], length=ema_period_15)
+    return df.iloc[-1]
 
-price_precision = {
-    "SBTCSUSDT": 1,
-    "SETHSUSDT": 1,
-    "SXRPSUSDT": 3,
-    # Add more pairs and their respective precisions here
-}
+def get_historical_data(symbol, interval, limit=14):
+    base_url = "https://fapi.binance.com/fapi/v1/klines"
+    params = {
+        "symbol": symbol,
+        "interval": interval,
+        "limit": limit
+    }
+    response = requests.get(base_url, params=params)
+    data = response.json()
+    
+    df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_asset_volume', 'number_of_trades', 'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+    df['close'] = df['close'].astype(float)
+    return df[['timestamp', 'close']]
 
-tp_percentage = 0.002  # 0.2%
+class TradingStrategy:
+    def __init__(self, pairs):
+        self.pairs = pairs
+        self.close_prices = {pair: deque(maxlen=ema_period_15) for pair in pairs}
+        self.last_ema_5 = {pair: None for pair in pairs}
+        self.last_ema_15 = {pair: None for pair in pairs}
+        self.bot_status = "Bot is running..."
+        
+        # Initialize with historical data
+        for pair in pairs:
+            historical_data = get_historical_data(pair, Timeframe)
+            self.close_prices[pair].extend(historical_data['close'].tolist())
+            
+            if len(self.close_prices[pair]) == ema_period_15:
+                indicators = calculate_indicators(list(self.close_prices[pair]))
+                self.last_ema_5[pair] = indicators['ema_5']
+                self.last_ema_15[pair] = indicators['ema_15']
 
-async def get_symbol_price(symbol):
-    async with websockets.connect(ws_uri) as websocket:
-        # Subscribe to the symbol ticker
-        subscribe_message = {
-            "op": "subscribe",
-            "args": [
-                {
-                    "instType": "mc",
-                    "channel": "ticker",
-                    "instId": symbol
-                }
-            ]
-        }
-        await websocket.send(json.dumps(subscribe_message))
+    def process_price(self, pair, timestamp, close_price, is_closed):
+        if is_closed:
+            self.close_prices[pair].append(close_price)
+
+        if len(self.close_prices[pair]) == ema_period_15:
+            indicators = calculate_indicators(list(self.close_prices[pair]))
+            ema_5 = indicators['ema_5']
+            ema_15 = indicators['ema_15']
+
+            if self.last_ema_5[pair] is not None and self.last_ema_15[pair] is not None:
+                if self.last_ema_5[pair] <= self.last_ema_15[pair] and ema_5 > ema_15:
+                    self.open_long_position(pair)
+                elif self.last_ema_5[pair] >= self.last_ema_15[pair] and ema_5 < ema_15:
+                    self.open_short_position(pair)
+
+            self.last_ema_5[pair] = ema_5
+            self.last_ema_15[pair] = ema_15
+
+    def open_long_position(self, pair):
+        print(f"Opening long position for {pair}")
+        subprocess.run(["python", "btc_long.py"])
+
+    def open_short_position(self, pair):
+        print(f"Opening short position for {pair}")
+        subprocess.run(["python", "btc_short.py"])
+
+strategy = TradingStrategy(Pairs)
+
+@app.route('/')
+def index():
+    template = '''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Trading Bot Status</title>
+        <style>
+            body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+            .status { font-size: 24px; padding: 20px; border: 1px solid #ccc; border-radius: 5px; }
+        </style>
+        <script>
+            function refreshPage() {
+                location.reload();
+            }
+            setInterval(refreshPage, 5000);
+        </script>
+    </head>
+    <body>
+        <div class="status">{{ bot_status }}</div>
+    </body>
+    </html>
+    '''
+    return render_template_string(template, bot_status=strategy.bot_status)
+
+async def connect_to_binance_futures():
+    uri = f"wss://fstream.binance.com/stream?streams={'/'.join([pair.lower() + '@kline_' + Timeframe for pair in Pairs])}"
+
+    async with websockets.connect(uri) as websocket:
+        print("Connected to Binance Futures WebSocket")
+
+        last_ping_time = time.time()
 
         while True:
-            response = await websocket.recv()
-            data = json.loads(response)
+            try:
+                message = await asyncio.wait_for(websocket.recv(), timeout=1)
+                process_message(json.loads(message))
 
-            if 'data' in data:
-                price = float(data['data'][0]['last'])
-                return price
+                current_time = time.time()
+                if current_time - last_ping_time > 60:
+                    await websocket.ping()
+                    last_ping_time = current_time
+                    print("Ping sent to keep connection alive")
 
-async def main():
-    current_price = await get_symbol_price(symbol)
+            except asyncio.TimeoutError:
+                current_time = time.time()
+                if current_time - last_ping_time > 60:
+                    await websocket.ping()
+                    last_ping_time = current_time
+                    print("Ping sent to keep connection alive")
 
-    # Calculate TP price based on side
-    if side == "buy":
-        tp_price = current_price * (1 + tp_percentage)
-        hold_side = "long"
-    elif side == "sell":
-        tp_price = current_price * (1 - tp_percentage)
-        hold_side = "short"
-    else:
-        raise ValueError("Invalid side. Must be 'buy' or 'sell'.")
+            except websockets.exceptions.ConnectionClosed:
+                print("WebSocket connection closed. Attempting to reconnect...")
+                strategy.bot_status = "Bot is not running. Attempting to reconnect..."
+                break
 
-    # Round price according to the price precision
-    precision = price_precision.get(symbol, 2)  # Default to 2 decimal places if not found
-    tp_price = round(tp_price, precision)
+    await asyncio.sleep(5)
+    await connect_to_binance_futures()
 
-    # Generate timestamp
-    timestamp = str(int(time.time() * 1000))
+def process_message(message):
+    stream = message['stream']
+    pair = stream.split('@')[0].upper()
+    data = message['data']
+    candle = data['k']
 
-    # Prepare the request body for placing an order
-    place_order_body = {
-        "symbol": symbol,
-        "productType": product_type,
-        "marginMode": "crossed",
-        "marginCoin": margin_coin,
-        "size": size,
-        "side": side,
-        "tradeSide": trade_side,
-        "orderType": order_type,
-        "clientOid": f"demo_trade_{timestamp}"
-    }
+    open_time = datetime.fromtimestamp(candle['t'] / 1000)
+    close_price = float(candle['c'])
+    is_closed = candle['x']
 
-    # Convert body to JSON string
-    place_order_body_str = json.dumps(place_order_body)
+    strategy.process_price(pair, open_time, close_price, is_closed)
 
-    # Generate the signature for placing an order
-    place_order_message = timestamp + "POST" + place_order_endpoint + place_order_body_str
-    place_order_signature = base64.b64encode(hmac.new(secret_key.encode('utf-8'), place_order_message.encode('utf-8'), digestmod='sha256').digest()).decode('utf-8')
-
-    # Prepare headers
-    headers = {
-        "ACCESS-KEY": api_key,
-        "ACCESS-SIGN": place_order_signature,
-        "ACCESS-TIMESTAMP": timestamp,
-        "ACCESS-PASSPHRASE": passphrase,
-        "Content-Type": "application/json",
-        "locale": "en-US"
-    }
-
-    # Send the request to place the order
-    place_order_response = requests.post(base_url + place_order_endpoint, headers=headers, data=place_order_body_str)
-
-    # Prepare the request body for the TP order
-    tpsl_order_body_profit = {
-        "marginCoin": margin_coin,
-        "productType": product_type,
-        "symbol": symbol,
-        "planType": "profit_plan",
-        "triggerPrice": str(tp_price),
-        "triggerType": "mark_price",
-        "executePrice": "0",
-        "holdSide": hold_side,
-        "size": size,
-        "clientOid": f"tp_trade_{timestamp}"
-    }
-
-    # Convert body to JSON string
-    tpsl_order_body_profit_str = json.dumps(tpsl_order_body_profit)
-
-    # Generate a new timestamp for the TP order
-    timestamp = str(int(time.time() * 1000))
-
-    # Generate the signature for the take profit order
-    tpsl_order_message_profit = timestamp + "POST" + tpsl_order_endpoint + tpsl_order_body_profit_str
-    tpsl_order_signature_profit = base64.b64encode(hmac.new(secret_key.encode('utf-8'), tpsl_order_message_profit.encode('utf-8'), digestmod='sha256').digest()).decode('utf-8')
-
-    # Update headers with new signature and timestamp
-    headers["ACCESS-SIGN"] = tpsl_order_signature_profit
-    headers["ACCESS-TIMESTAMP"] = timestamp
-
-    # Send the request to place the take profit order
-    tpsl_order_response_profit = requests.post(base_url + tpsl_order_endpoint, headers=headers, data=tpsl_order_body_profit_str)
-
-    # Print responses
-    print("Place Order Response:", place_order_response.json())
-    print("Take Profit Order Response:", tpsl_order_response_profit.json())
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    flask_thread = Thread(target=run_flask)
+    flask_thread.start()
+    asyncio.get_event_loop().run_until_complete(connect_to_binance_futures())
