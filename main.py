@@ -10,7 +10,7 @@ from threading import Thread
 import time
 
 # Customizable variables
-Timeframe = '5m'
+Timeframe = '1m'
 portfolio_balance = 1000
 trade_amount = 100
 leverage_x = 10
