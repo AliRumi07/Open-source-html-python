@@ -9,6 +9,7 @@ import json
 from flask import Flask, render_template_string
 from threading import Thread
 import time
+import subprocess
 
 # Customizable variables
 Timeframe = '1m'
@@ -20,9 +21,7 @@ ema_period_5 = 5
 ema_period_15 = 15
 
 # Add the Pair variable
-Pairs = [
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "TONUSDT", "ADAUSDT", "TRXUSDT", "AVAXUSDT"
-]
+Pairs = [ "BTCUSDT" ]
 
 app = Flask(__name__)
 
@@ -110,6 +109,7 @@ class TradingStrategy:
             self.pair_stats[pair]['Longs'] += 1
             self.pair_stats[pair]['Hedge'] += 1
             self.update_stats(pair, price)
+            subprocess.run(["python", "btc_long.py"])
 
     def open_short_position(self, pair, timestamp, price):
         if not self.positions[pair]["Short"]:
@@ -119,18 +119,13 @@ class TradingStrategy:
             self.pair_stats[pair]['Shorts'] += 1
             self.pair_stats[pair]['Hedge'] += 1
             self.update_stats(pair, price)
+            subprocess.run(["python", "btc_short.py"])
 
     def check_take_profit(self, pair, timestamp, current_price):
         if self.positions[pair]["Long"] and current_price >= self.take_profit_prices[pair]["Long"]:
             self.close_position(pair, timestamp, current_price, "Long")
-            self.open_long_position(pair, timestamp, current_price)
-            if self.positions[pair]["Short"]:
-                self.close_position(pair, timestamp, current_price, "Short")
         if self.positions[pair]["Short"] and current_price <= self.take_profit_prices[pair]["Short"]:
             self.close_position(pair, timestamp, current_price, "Short")
-            self.open_short_position(pair, timestamp, current_price)
-            if self.positions[pair]["Long"]:
-                self.close_position(pair, timestamp, current_price, "Long")
 
     def close_position(self, pair, timestamp, exit_price, position_type):
         self.total_trades += 1
