@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pandas_ta as ta
 from datetime import datetime
 from collections import deque
 import asyncio
@@ -10,17 +11,11 @@ from threading import Thread
 import time
 
 # Customizable variables
-Timeframe = '1m'
-portfolio_balance = 1000
-trade_amount = 100
-leverage_x = 10
-take_profit = 0.004
-stop_loss = 0.004
+portfolio_balance = 100
+trade_amount = 10
 fee_rate = 0.001
-
-# SuperTrend parameters
-atr_period = 10
-atr_multiplier = 3
+ema_period_5 = 5
+ema_period_15 = 15
 
 # Add the Pair variable
 Pairs = [
@@ -29,66 +24,32 @@ Pairs = [
 
 app = Flask(__name__)
 
-def calculate_supertrend(high, low, close, period=atr_period, multiplier=atr_multiplier):
-    hl2 = (high + low) / 2
-    atr = np.zeros_like(close)
-    atr[period-1] = np.mean(high[:period] - low[:period])
-    for i in range(period, len(close)):
-        atr[i] = (atr[i-1] * (period - 1) + np.max([high[i] - low[i], 
-                                                    abs(high[i] - close[i-1]), 
-                                                    abs(low[i] - close[i-1])])) / period
-    
-    upperband = hl2 + (multiplier * atr)
-    lowerband = hl2 - (multiplier * atr)
-    
-    supertrend = np.zeros_like(close)
-    direction = np.zeros_like(close)
-    
-    for i in range(1, len(close)):
-        if close[i] > upperband[i-1]:
-            supertrend[i] = lowerband[i]
-            direction[i] = 1
-        elif close[i] < lowerband[i-1]:
-            supertrend[i] = upperband[i]
-            direction[i] = -1
-        else:
-            supertrend[i] = supertrend[i-1]
-            direction[i] = direction[i-1]
-            
-            if direction[i] == 1 and lowerband[i] < supertrend[i]:
-                supertrend[i] = lowerband[i]
-            elif direction[i] == -1 and upperband[i] > supertrend[i]:
-                supertrend[i] = upperband[i]
-    
-    return supertrend, direction
+def calculate_indicators(prices):
+    df = pd.DataFrame(prices, columns=['close'])
+    df['ema_5'] = ta.ema(df['close'], length=ema_period_5)
+    df['ema_15'] = ta.ema(df['close'], length=ema_period_15)
+    return df.iloc[-1]
 
 class TradingStrategy:
     def __init__(self, pairs):
         self.pairs = pairs
-        self.positions = {pair: None for pair in pairs}
-        self.entry_prices = {pair: None for pair in pairs}
-        self.stop_loss_prices = {pair: None for pair in pairs}
-        self.take_profit_prices = {pair: None for pair in pairs}
+        self.positions = {pair: {'Long': False, 'Short': False} for pair in pairs}
+        self.entry_prices = {pair: {'Long': None, 'Short': None} for pair in pairs}
         self.total_trades = 0
         self.trades_in_profit = 0
-        self.trades_in_loss = 0
         self.total_profit_loss = 0
         self.max_drawdown = 0
         self.lowest_balance = portfolio_balance
-        self.candle_data = {pair: {'open': deque(maxlen=atr_period), 
-                                   'high': deque(maxlen=atr_period), 
-                                   'low': deque(maxlen=atr_period), 
-                                   'close': deque(maxlen=atr_period)} for pair in pairs}
-        self.pending_long = {pair: False for pair in pairs}
-        self.pending_short = {pair: False for pair in pairs}
+        self.close_prices = {pair: deque(maxlen=ema_period_15) for pair in pairs}
+        self.prev_ema_5 = {pair: None for pair in pairs}
+        self.prev_ema_15 = {pair: None for pair in pairs}
 
         self.pair_stats = {pair: {
             'Price': 0,
-            'Position': 'None',
+            'Hedge': 0,
             'Longs': 0,
             'Shorts': 0,
             'In Profit': 0,
-            'In Loss': 0,
             'Total P/L': 0,
             'Current P/L': 0
         } for pair in pairs}
@@ -98,121 +59,64 @@ class TradingStrategy:
             'Portfolio Balance': portfolio_balance,
             'Total Trades': 0,
             'Trades in Profit': 0,
-            'Trades in Loss': 0,
             'Accuracy': 0,
             'Max Drawdown': 0
         }
 
-    def process_price(self, pair, timestamp, open_price, high_price, low_price, close_price, volume, is_closed):
+    def process_price(self, pair, timestamp, open_price, high_price, low_price, close_price, volume):
         self.pair_stats[pair]['Price'] = close_price
+        self.close_prices[pair].append(close_price)
 
-        if self.positions[pair] is not None:
-            if self.positions[pair] == "Long":
-                current_pl = (close_price - self.entry_prices[pair]) / self.entry_prices[pair] * trade_amount * leverage_x
-            else:
-                current_pl = (self.entry_prices[pair] - close_price) / self.entry_prices[pair] * trade_amount * leverage_x
-            current_pl -= trade_amount * leverage_x * fee_rate
-            self.pair_stats[pair]['Current P/L'] = current_pl
-        else:
-            self.pair_stats[pair]['Current P/L'] = 0
+        if len(self.close_prices[pair]) == ema_period_15:
+            indicators = calculate_indicators(list(self.close_prices[pair]))
+            ema_5 = indicators['ema_5']
+            ema_15 = indicators['ema_15']
 
-        if is_closed:
-            self.candle_data[pair]['open'].append(open_price)
-            self.candle_data[pair]['high'].append(high_price)
-            self.candle_data[pair]['low'].append(low_price)
-            self.candle_data[pair]['close'].append(close_price)
+            if self.prev_ema_5[pair] is not None and self.prev_ema_15[pair] is not None:
+                if self.prev_ema_5[pair] <= self.prev_ema_15[pair] and ema_5 > ema_15:
+                    self.open_long_position(pair, timestamp, close_price)
+                elif self.prev_ema_5[pair] >= self.prev_ema_15[pair] and ema_5 < ema_15:
+                    self.open_short_position(pair, timestamp, close_price)
 
-        if len(self.candle_data[pair]['close']) == atr_period:
-            supertrend, direction = calculate_supertrend(
-                np.array(self.candle_data[pair]['high']),
-                np.array(self.candle_data[pair]['low']),
-                np.array(self.candle_data[pair]['close'])
-            )
+            self.prev_ema_5[pair] = ema_5
+            self.prev_ema_15[pair] = ema_15
 
-            if self.positions[pair] is None and is_closed:
-                if direction[-1] == 1:  # SuperTrend gives long signal
-                    self.pending_long[pair] = True
-                elif direction[-1] == -1:  # SuperTrend gives short signal
-                    self.pending_short[pair] = True
-
-            if self.positions[pair] is not None:
-                self.check_exit_conditions(pair, timestamp, high_price, low_price)
-
-            if self.pending_long[pair] or self.pending_short[pair]:
-                if self.pending_long[pair]:
-                    self.open_long_position(pair, timestamp, open_price)
-                    self.pending_long[pair] = False
-                elif self.pending_short[pair]:
-                    self.open_short_position(pair, timestamp, open_price)
-                    self.pending_short[pair] = False
+        self.update_current_pl(pair, close_price)
 
     def open_long_position(self, pair, timestamp, price):
-        self.positions[pair] = "Long"
-        self.entry_prices[pair] = price
-        self.stop_loss_prices[pair] = self.entry_prices[pair] * (1 - stop_loss)
-        self.take_profit_prices[pair] = self.entry_prices[pair] * (1 + take_profit)
-        self.pair_stats[pair]['Longs'] += 1
-        self.update_stats(pair, price)
+        if not self.positions[pair]['Long']:
+            self.positions[pair]['Long'] = True
+            self.entry_prices[pair]['Long'] = price
+            self.pair_stats[pair]['Longs'] += 1
+            self.update_stats(pair, price)
 
     def open_short_position(self, pair, timestamp, price):
-        self.positions[pair] = "Short"
-        self.entry_prices[pair] = price
-        self.stop_loss_prices[pair] = self.entry_prices[pair] * (1 + stop_loss)
-        self.take_profit_prices[pair] = self.entry_prices[pair] * (1 - take_profit)
-        self.pair_stats[pair]['Shorts'] += 1
-        self.update_stats(pair, price)
+        if not self.positions[pair]['Short']:
+            self.positions[pair]['Short'] = True
+            self.entry_prices[pair]['Short'] = price
+            self.pair_stats[pair]['Shorts'] += 1
+            self.update_stats(pair, price)
 
-    def check_exit_conditions(self, pair, timestamp, high_price, low_price):
-        if self.positions[pair] == "Long":
-            if high_price >= self.take_profit_prices[pair]:
-                self.close_position(pair, timestamp, self.take_profit_prices[pair], True)
-            elif low_price <= self.stop_loss_prices[pair]:
-                self.close_position(pair, timestamp, self.stop_loss_prices[pair], False)
-        elif self.positions[pair] == "Short":
-            if low_price <= self.take_profit_prices[pair]:
-                self.close_position(pair, timestamp, self.take_profit_prices[pair], True)
-            elif high_price >= self.stop_loss_prices[pair]:
-                self.close_position(pair, timestamp, self.stop_loss_prices[pair], False)
+    def update_current_pl(self, pair, current_price):
+        total_pl = 0
+        if self.positions[pair]['Long']:
+            long_pl = (current_price - self.entry_prices[pair]['Long']) / self.entry_prices[pair]['Long'] * trade_amount
+            total_pl += long_pl
+        if self.positions[pair]['Short']:
+            short_pl = (self.entry_prices[pair]['Short'] - current_price) / self.entry_prices[pair]['Short'] * trade_amount
+            total_pl += short_pl
 
-    def close_position(self, pair, timestamp, exit_price, is_profit):
-        self.total_trades += 1
-
-        if is_profit:
-            self.trades_in_profit += 1
-            self.pair_stats[pair]['In Profit'] += 1
-        else:
-            self.trades_in_loss += 1
-            self.pair_stats[pair]['In Loss'] += 1
-
-        if self.positions[pair] == "Long":
-            profit_loss = (exit_price - self.entry_prices[pair]) / self.entry_prices[pair] * trade_amount * leverage_x
-        else:
-            profit_loss = (self.entry_prices[pair] - exit_price) / self.entry_prices[pair] * trade_amount * leverage_x
-
-        profit_loss -= trade_amount * leverage_x * fee_rate
-        self.total_profit_loss += profit_loss
-        self.pair_stats[pair]['Total P/L'] += profit_loss
-
-        current_balance = portfolio_balance + self.total_profit_loss
-        drawdown = (portfolio_balance - current_balance) / portfolio_balance
-        self.max_drawdown = max(self.max_drawdown, drawdown)
-        self.lowest_balance = min(self.lowest_balance, current_balance)
-
-        self.positions[pair] = None
-        self.entry_prices[pair] = None
-        self.stop_loss_prices[pair] = None
-        self.take_profit_prices[pair] = None
-        self.update_stats(pair, exit_price)
+        total_pl -= trade_amount * fee_rate * (self.positions[pair]['Long'] + self.positions[pair]['Short'])
+        self.pair_stats[pair]['Current P/L'] = total_pl
 
     def update_stats(self, pair, current_price):
         self.pair_stats[pair]['Price'] = current_price
-        self.pair_stats[pair]['Position'] = self.positions[pair] or 'None'
+        self.pair_stats[pair]['Hedge'] = sum(self.positions[pair].values())
 
         self.overall_stats['Total P/L'] = self.total_profit_loss
         self.overall_stats['Portfolio Balance'] = portfolio_balance + self.total_profit_loss
         self.overall_stats['Total Trades'] = self.total_trades
         self.overall_stats['Trades in Profit'] = self.trades_in_profit
-        self.overall_stats['Trades in Loss'] = self.trades_in_loss
         self.overall_stats['Accuracy'] = (self.trades_in_profit / self.total_trades) * 100 if self.total_trades > 0 else 0
         self.overall_stats['Max Drawdown'] = self.max_drawdown * 100
 
@@ -245,11 +149,10 @@ def index():
             <tr>
                 <th>Pair</th>
                 <th>Price</th>
-                <th>Position</th>
+                <th>Hedge</th>
                 <th>Longs</th>
                 <th>Shorts</th>
                 <th>In Profit</th>
-                <th>In Loss</th>
                 <th>Total P/L</th>
                 <th>Current P/L</th>
             </tr>
@@ -257,11 +160,10 @@ def index():
             <tr>
                 <td>{{ pair }}</td>
                 <td>${{ "%.2f"|format(stats['Price']) }}</td>
-                <td>{{ stats['Position'] }}</td>
+                <td>{{ stats['Hedge'] }}</td>
                 <td>{{ stats['Longs'] }}</td>
                 <td>{{ stats['Shorts'] }}</td>
                 <td>{{ stats['In Profit'] }}</td>
-                <td>{{ stats['In Loss'] }}</td>
                 <td>${{ "%.2f"|format(stats['Total P/L']) }}</td>
                 <td class="{{ 'positive' if stats['Current P/L'] > 0 else 'negative' if stats['Current P/L'] < 0 else '' }}">
                     ${{ "%.2f"|format(stats['Current P/L']) }}
@@ -297,7 +199,7 @@ def index():
     return render_template_string(template, pair_stats=strategy.pair_stats, overall_stats=strategy.overall_stats)
 
 async def connect_to_binance_futures():
-    uri = f"wss://fstream.binance.com/stream?streams={'/'.join([pair.lower() + '@kline_' + Timeframe for pair in Pairs])}"
+    uri = f"wss://fstream.binance.com/stream?streams={'/'.join([pair.lower() + '@kline_1m' for pair in Pairs])}"
 
     async with websockets.connect(uri) as websocket:
         print("Connected to Binance Futures WebSocket")
@@ -341,9 +243,8 @@ def process_message(message):
     low_price = float(candle['l'])
     close_price = float(candle['c'])
     volume = float(candle['v'])
-    is_closed = candle['x']
 
-    strategy.process_price(pair, open_time, open_price, high_price, low_price, close_price, volume, is_closed)
+    strategy.process_price(pair, open_time, open_price, high_price, low_price, close_price, volume)
 
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
