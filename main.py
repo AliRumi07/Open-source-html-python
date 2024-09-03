@@ -27,8 +27,8 @@ BINANCE_BASE_URL = "https://fapi.binance.com"
 
 app = Flask(__name__)
 
-def calculate_indicators(prices):
-    df = pd.DataFrame(prices, columns=['close'])
+def calculate_indicators(prices, volumes):
+    df = pd.DataFrame({'close': prices, 'volume': volumes})
     df['ema_5'] = ta.ema(df['close'], length=ema_period_5)
     df['ema_15'] = ta.ema(df['close'], length=ema_period_15)
     df['rsi'] = ta.rsi(df['close'], length=rsi_period)
@@ -44,15 +44,16 @@ def fetch_historical_data(symbol, interval, limit=14):
     response = requests.get(endpoint, params=params)
     if response.status_code == 200:
         data = response.json()
-        return [float(candle[4]) for candle in data]  # Return closing prices
+        return [float(candle[4]) for candle in data], [float(candle[5]) for candle in data]  # Return closing prices and volumes
     else:
         print(f"Failed to fetch historical data: {response.status_code}")
-        return []
+        return [], []
 
 class TradingStrategy:
     def __init__(self, pairs):
         self.pairs = pairs
         self.close_prices = {pair: deque(maxlen=max(ema_period_15, rsi_period)) for pair in pairs}
+        self.volumes = {pair: deque(maxlen=max(ema_period_15, rsi_period)) for pair in pairs}
         self.last_ema_5 = {pair: None for pair in pairs}
         self.last_ema_15 = {pair: None for pair in pairs}
         self.last_rsi = {pair: None for pair in pairs}
@@ -60,28 +61,32 @@ class TradingStrategy:
         
         # Initialize with historical data
         for pair in pairs:
-            historical_prices = fetch_historical_data(pair, Timeframe)
+            historical_prices, historical_volumes = fetch_historical_data(pair, Timeframe)
             self.close_prices[pair].extend(historical_prices)
+            self.volumes[pair].extend(historical_volumes)
             if len(historical_prices) == 14:
-                indicators = calculate_indicators(historical_prices)
+                indicators = calculate_indicators(historical_prices, historical_volumes)
                 self.last_ema_5[pair] = indicators['ema_5']
                 self.last_ema_15[pair] = indicators['ema_15']
                 self.last_rsi[pair] = indicators['rsi']
 
-    def process_price(self, pair, timestamp, close_price, is_closed):
+    def process_price(self, pair, timestamp, close_price, volume, is_closed):
         if is_closed:
             self.close_prices[pair].append(close_price)
+            self.volumes[pair].append(volume)
 
         if len(self.close_prices[pair]) == max(ema_period_15, rsi_period):
-            indicators = calculate_indicators(list(self.close_prices[pair]))
+            indicators = calculate_indicators(list(self.close_prices[pair]), list(self.volumes[pair]))
             ema_5 = indicators['ema_5']
             ema_15 = indicators['ema_15']
             rsi = indicators['rsi']
 
             if self.last_ema_5[pair] is not None and self.last_ema_15[pair] is not None and self.last_rsi[pair] is not None:
-                if (self.last_ema_5[pair] <= self.last_ema_15[pair] and ema_5 > ema_15) and rsi > rsi_overbought:
+                volume_confirmation = self.volumes[pair][-1] > self.volumes[pair][-2]
+                
+                if (self.last_ema_5[pair] <= self.last_ema_15[pair] and ema_5 > ema_15) and rsi > rsi_overbought and volume_confirmation:
                     self.open_long_position(pair)
-                elif (self.last_ema_5[pair] >= self.last_ema_15[pair] and ema_5 < ema_15) and rsi < rsi_oversold:
+                elif (self.last_ema_5[pair] >= self.last_ema_15[pair] and ema_5 < ema_15) and rsi < rsi_oversold and volume_confirmation:
                     self.open_short_position(pair)
 
             self.last_ema_5[pair] = ema_5
@@ -163,9 +168,10 @@ def process_message(message):
 
     open_time = datetime.fromtimestamp(candle['t'] / 1000)
     close_price = float(candle['c'])
+    volume = float(candle['v'])
     is_closed = candle['x']
 
-    strategy.process_price(pair, open_time, close_price, is_closed)
+    strategy.process_price(pair, open_time, close_price, volume, is_closed)
 
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
