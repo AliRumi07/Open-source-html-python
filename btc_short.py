@@ -19,7 +19,7 @@ symbol = "SBTCSUSDT"  # You can change this to "SETHSUSDT" or "SXRPSUSDT"
 product_type = "usdt-futures"
 margin_coin = "SUSDT"
 size = "0.001"  # trade size
-leverage = "125"  # leverage
+leverage = "1"  # leverage
 side = "sell"  # Change to "sell" for a sell order
 trade_side = "open"
 order_type = "market"
@@ -34,6 +34,7 @@ price_precision = {
 }
 
 tp_percentage = 0.002  # 0.2%
+sl_percentage = 0.002  # 0.2%
 
 async def get_symbol_price(symbol):
     async with websockets.connect(ws_uri) as websocket:
@@ -61,19 +62,22 @@ async def get_symbol_price(symbol):
 async def main():
     current_price = await get_symbol_price(symbol)
 
-    # Calculate TP price based on side
+    # Calculate TP and SL prices based on side
     if side == "buy":
         tp_price = current_price * (1 + tp_percentage)
+        sl_price = current_price * (1 - sl_percentage)
         hold_side = "long"
     elif side == "sell":
         tp_price = current_price * (1 - tp_percentage)
+        sl_price = current_price * (1 + sl_percentage)
         hold_side = "short"
     else:
         raise ValueError("Invalid side. Must be 'buy' or 'sell'.")
 
-    # Round price according to the price precision
+    # Round prices according to the price precision
     precision = price_precision.get(symbol, 2)  # Default to 2 decimal places if not found
     tp_price = round(tp_price, precision)
+    sl_price = round(sl_price, precision)
 
     # Generate timestamp
     timestamp = str(int(time.time() * 1000))
@@ -82,7 +86,7 @@ async def main():
     place_order_body = {
         "symbol": symbol,
         "productType": product_type,
-        "marginMode": "crossed",
+        "marginMode": "isolated",
         "marginCoin": margin_coin,
         "size": size,
         "side": side,
@@ -111,7 +115,7 @@ async def main():
     # Send the request to place the order
     place_order_response = requests.post(base_url + place_order_endpoint, headers=headers, data=place_order_body_str)
 
-    # Prepare the request body for the TP order
+    # Prepare the request body for the TPSL order
     tpsl_order_body_profit = {
         "marginCoin": margin_coin,
         "productType": product_type,
@@ -128,7 +132,7 @@ async def main():
     # Convert body to JSON string
     tpsl_order_body_profit_str = json.dumps(tpsl_order_body_profit)
 
-    # Generate a new timestamp for the TP order
+    # Generate a new timestamp for the TPSL order
     timestamp = str(int(time.time() * 1000))
 
     # Generate the signature for the take profit order
@@ -142,9 +146,36 @@ async def main():
     # Send the request to place the take profit order
     tpsl_order_response_profit = requests.post(base_url + tpsl_order_endpoint, headers=headers, data=tpsl_order_body_profit_str)
 
-    # Print responses
-    print("Place Order Response:", place_order_response.json())
-    print("Take Profit Order Response:", tpsl_order_response_profit.json())
+    # Prepare the request body for the stop loss order
+    tpsl_order_body_loss = {
+        "marginCoin": margin_coin,
+        "productType": product_type,
+        "symbol": symbol,
+        "planType": "loss_plan",
+        "triggerPrice": str(sl_price),
+        "triggerType": "mark_price",
+        "executePrice": "0",
+        "holdSide": hold_side,
+        "size": size,
+        "clientOid": f"sl_trade_{timestamp}"
+    }
+
+    # Convert body to JSON string
+    tpsl_order_body_loss_str = json.dumps(tpsl_order_body_loss)
+
+    # Generate a new timestamp for the stop loss order
+    timestamp = str(int(time.time() * 1000))
+
+    # Generate the signature for the stop loss order
+    tpsl_order_message_loss = timestamp + "POST" + tpsl_order_endpoint + tpsl_order_body_loss_str
+    tpsl_order_signature_loss = base64.b64encode(hmac.new(secret_key.encode('utf-8'), tpsl_order_message_loss.encode('utf-8'), digestmod='sha256').digest()).decode('utf-8')
+
+    # Update headers with new signature and timestamp
+    headers["ACCESS-SIGN"] = tpsl_order_signature_loss
+    headers["ACCESS-TIMESTAMP"] = timestamp
+
+    # Send the request to place the stop loss order
+    tpsl_order_response_loss = requests.post(base_url + tpsl_order_endpoint, headers=headers, data=tpsl_order_body_loss_str)
 
 if __name__ == "__main__":
     asyncio.run(main())
