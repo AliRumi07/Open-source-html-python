@@ -14,8 +14,11 @@ import requests
 
 # Customizable variables
 Timeframe = '1m'
-ema_period_5 = 5
-ema_period_15 = 15
+ema_period_10 = 10
+ema_period_20 = 20
+rsi_period = 14
+bb_period = 20
+bb_std = 2
 
 # Add the Pair variable
 Pairs = ["BTCUSDT"]
@@ -24,11 +27,15 @@ app = Flask(__name__)
 
 def calculate_indicators(prices):
     df = pd.DataFrame(prices, columns=['close'])
-    df['ema_5'] = ta.ema(df['close'], length=ema_period_5)
-    df['ema_15'] = ta.ema(df['close'], length=ema_period_15)
+    df['ema_10'] = ta.ema(df['close'], length=ema_period_10)
+    df['ema_20'] = ta.ema(df['close'], length=ema_period_20)
+    df['rsi'] = ta.rsi(df['close'], length=rsi_period)
+    bb = ta.bbands(df['close'], length=bb_period, std=bb_std)
+    df['bb_lower'] = bb['BBL_20_2.0']
+    df['bb_upper'] = bb['BBU_20_2.0']
     return df.iloc[-1]
 
-def get_historical_data(symbol, interval, limit=14):
+def get_historical_data(symbol, interval, limit=20):
     base_url = "https://fapi.binance.com/fapi/v1/klines"
     params = {
         "symbol": symbol,
@@ -46,9 +53,9 @@ def get_historical_data(symbol, interval, limit=14):
 class TradingStrategy:
     def __init__(self, pairs):
         self.pairs = pairs
-        self.close_prices = {pair: deque(maxlen=ema_period_15) for pair in pairs}
-        self.last_ema_5 = {pair: None for pair in pairs}
-        self.last_ema_15 = {pair: None for pair in pairs}
+        self.close_prices = {pair: deque(maxlen=100) for pair in pairs}
+        self.last_ema_10 = {pair: None for pair in pairs}
+        self.last_ema_20 = {pair: None for pair in pairs}
         self.bot_status = "Bot is running..."
         
         # Initialize with historical data
@@ -56,28 +63,33 @@ class TradingStrategy:
             historical_data = get_historical_data(pair, Timeframe)
             self.close_prices[pair].extend(historical_data['close'].tolist())
             
-            if len(self.close_prices[pair]) == ema_period_15:
+            if len(self.close_prices[pair]) == 100:
                 indicators = calculate_indicators(list(self.close_prices[pair]))
-                self.last_ema_5[pair] = indicators['ema_5']
-                self.last_ema_15[pair] = indicators['ema_15']
+                self.last_ema_10[pair] = indicators['ema_10']
+                self.last_ema_20[pair] = indicators['ema_20']
 
     def process_price(self, pair, timestamp, close_price, is_closed):
         if is_closed:
             self.close_prices[pair].append(close_price)
 
-        if len(self.close_prices[pair]) == ema_period_15:
+        if len(self.close_prices[pair]) == 100:
             indicators = calculate_indicators(list(self.close_prices[pair]))
-            ema_5 = indicators['ema_5']
-            ema_15 = indicators['ema_15']
+            ema_10 = indicators['ema_10']
+            ema_20 = indicators['ema_20']
+            rsi = indicators['rsi']
+            bb_lower = indicators['bb_lower']
+            bb_upper = indicators['bb_upper']
 
-            if self.last_ema_5[pair] is not None and self.last_ema_15[pair] is not None:
-                if self.last_ema_5[pair] <= self.last_ema_15[pair] and ema_5 > ema_15:
+            if self.last_ema_10[pair] is not None and self.last_ema_20[pair] is not None:
+                if (self.last_ema_10[pair] <= self.last_ema_20[pair] and ema_10 > ema_20 and
+                    40 <= rsi <= 60 and close_price <= bb_lower):
                     self.open_long_position(pair)
-                elif self.last_ema_5[pair] >= self.last_ema_15[pair] and ema_5 < ema_15:
+                elif (self.last_ema_10[pair] >= self.last_ema_20[pair] and ema_10 < ema_20 and
+                      40 <= rsi <= 60 and close_price >= bb_upper):
                     self.open_short_position(pair)
 
-            self.last_ema_5[pair] = ema_5
-            self.last_ema_15[pair] = ema_15
+            self.last_ema_10[pair] = ema_10
+            self.last_ema_20[pair] = ema_20
 
     def open_long_position(self, pair):
         print(f"Opening long position for {pair}")
