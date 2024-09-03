@@ -14,82 +14,79 @@ import requests
 
 # Customizable variables
 Timeframe = '1m'
-ema_period_10 = 10
-ema_period_20 = 20
-rsi_period = 14
-bb_period = 20
-bb_std = 2
+ema_period_5 = 5
+ema_period_15 = 15
+rsi_period = 3
+rsi_overbought = 70
+rsi_oversold = 30
 
 # Add the Pair variable
 Pairs = ["BTCUSDT"]
+
+BINANCE_BASE_URL = "https://fapi.binance.com"
 
 app = Flask(__name__)
 
 def calculate_indicators(prices):
     df = pd.DataFrame(prices, columns=['close'])
-    df['ema_10'] = ta.ema(df['close'], length=ema_period_10)
-    df['ema_20'] = ta.ema(df['close'], length=ema_period_20)
+    df['ema_5'] = ta.ema(df['close'], length=ema_period_5)
+    df['ema_15'] = ta.ema(df['close'], length=ema_period_15)
     df['rsi'] = ta.rsi(df['close'], length=rsi_period)
-    bb = ta.bbands(df['close'], length=bb_period, std=bb_std)
-    df['bb_lower'] = bb['BBL_20_2.0']
-    df['bb_upper'] = bb['BBU_20_2.0']
     return df.iloc[-1]
 
-def get_historical_data(symbol, interval, limit=20):
-    base_url = "https://fapi.binance.com/fapi/v1/klines"
+def fetch_historical_data(symbol, interval, limit=14):
+    endpoint = f"{BINANCE_BASE_URL}/fapi/v1/klines"
     params = {
         "symbol": symbol,
         "interval": interval,
         "limit": limit
     }
-    response = requests.get(base_url, params=params)
-    data = response.json()
-    
-    df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_asset_volume', 'number_of_trades', 'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df['close'] = df['close'].astype(float)
-    return df[['timestamp', 'close']]
+    response = requests.get(endpoint, params=params)
+    if response.status_code == 200:
+        data = response.json()
+        return [float(candle[4]) for candle in data]  # Return closing prices
+    else:
+        print(f"Failed to fetch historical data: {response.status_code}")
+        return []
 
 class TradingStrategy:
     def __init__(self, pairs):
         self.pairs = pairs
-        self.close_prices = {pair: deque(maxlen=100) for pair in pairs}
-        self.last_ema_10 = {pair: None for pair in pairs}
-        self.last_ema_20 = {pair: None for pair in pairs}
+        self.close_prices = {pair: deque(maxlen=max(ema_period_15, rsi_period)) for pair in pairs}
+        self.last_ema_5 = {pair: None for pair in pairs}
+        self.last_ema_15 = {pair: None for pair in pairs}
+        self.last_rsi = {pair: None for pair in pairs}
         self.bot_status = "Bot is running..."
         
         # Initialize with historical data
         for pair in pairs:
-            historical_data = get_historical_data(pair, Timeframe)
-            self.close_prices[pair].extend(historical_data['close'].tolist())
-            
-            if len(self.close_prices[pair]) == 100:
-                indicators = calculate_indicators(list(self.close_prices[pair]))
-                self.last_ema_10[pair] = indicators['ema_10']
-                self.last_ema_20[pair] = indicators['ema_20']
+            historical_prices = fetch_historical_data(pair, Timeframe)
+            self.close_prices[pair].extend(historical_prices)
+            if len(historical_prices) == 14:
+                indicators = calculate_indicators(historical_prices)
+                self.last_ema_5[pair] = indicators['ema_5']
+                self.last_ema_15[pair] = indicators['ema_15']
+                self.last_rsi[pair] = indicators['rsi']
 
     def process_price(self, pair, timestamp, close_price, is_closed):
         if is_closed:
             self.close_prices[pair].append(close_price)
 
-        if len(self.close_prices[pair]) == 100:
+        if len(self.close_prices[pair]) == max(ema_period_15, rsi_period):
             indicators = calculate_indicators(list(self.close_prices[pair]))
-            ema_10 = indicators['ema_10']
-            ema_20 = indicators['ema_20']
+            ema_5 = indicators['ema_5']
+            ema_15 = indicators['ema_15']
             rsi = indicators['rsi']
-            bb_lower = indicators['bb_lower']
-            bb_upper = indicators['bb_upper']
 
-            if self.last_ema_10[pair] is not None and self.last_ema_20[pair] is not None:
-                if (self.last_ema_10[pair] <= self.last_ema_20[pair] and ema_10 > ema_20 and
-                    40 <= rsi <= 60 and close_price <= bb_lower):
+            if self.last_ema_5[pair] is not None and self.last_ema_15[pair] is not None and self.last_rsi[pair] is not None:
+                if (self.last_ema_5[pair] <= self.last_ema_15[pair] and ema_5 > ema_15) and rsi > rsi_overbought:
                     self.open_long_position(pair)
-                elif (self.last_ema_10[pair] >= self.last_ema_20[pair] and ema_10 < ema_20 and
-                      40 <= rsi <= 60 and close_price >= bb_upper):
+                elif (self.last_ema_5[pair] >= self.last_ema_15[pair] and ema_5 < ema_15) and rsi < rsi_oversold:
                     self.open_short_position(pair)
 
-            self.last_ema_10[pair] = ema_10
-            self.last_ema_20[pair] = ema_20
+            self.last_ema_5[pair] = ema_5
+            self.last_ema_15[pair] = ema_15
+            self.last_rsi[pair] = rsi
 
     def open_long_position(self, pair):
         print(f"Opening long position for {pair}")
@@ -98,8 +95,6 @@ class TradingStrategy:
     def open_short_position(self, pair):
         print(f"Opening short position for {pair}")
         subprocess.run(["python", "btc_short.py"])
-
-strategy = TradingStrategy(Pairs)
 
 @app.route('/')
 def index():
@@ -176,6 +171,7 @@ def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
 if __name__ == "__main__":
+    strategy = TradingStrategy(Pairs)
     flask_thread = Thread(target=run_flask)
     flask_thread.start()
     asyncio.get_event_loop().run_until_complete(connect_to_binance_futures())
