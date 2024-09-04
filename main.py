@@ -2,13 +2,13 @@ import numpy as np
 import pandas as pd
 import pandas_ta as ta
 from datetime import datetime
-from collections import deque
 import asyncio
 import websockets
 import json
 from flask import Flask, render_template_string
 from threading import Thread
 import subprocess
+import requests
 
 # Customizable variables
 Timeframe = '5m'
@@ -33,7 +33,7 @@ def calculate_indicators(prices):
 class TradingStrategy:
     def __init__(self, pairs):
         self.pairs = pairs
-        self.close_prices = {pair: deque(maxlen=ema_period_15) for pair in pairs}
+        self.close_prices = {pair: [] for pair in pairs}
         self.bot_status = "Bot is running..."
         self.previous_candle_color = {pair: None for pair in pairs}
 
@@ -54,12 +54,14 @@ class TradingStrategy:
     def process_price(self, pair, timestamp, open_price, high_price, low_price, close_price, volume, is_closed):
         if is_closed:
             self.close_prices[pair].append(close_price)
+            if len(self.close_prices[pair]) > ema_period_15:
+                self.close_prices[pair] = self.close_prices[pair][-ema_period_15:]
 
             # Determine current candle color
             current_candle_color = 'green' if close_price > open_price else 'red'
 
             if len(self.close_prices[pair]) == ema_period_15:
-                indicators = calculate_indicators(list(self.close_prices[pair]))
+                indicators = calculate_indicators(self.close_prices[pair])
                 ema_5 = indicators['ema_5']
                 ema_15 = indicators['ema_15']
                 rsi = indicators['rsi']
@@ -111,8 +113,31 @@ def index():
     '''
     return render_template_string(template, bot_status=strategy.bot_status)
 
+def get_historical_klines(symbol, interval, limit=15):
+    url = f"https://fapi.binance.com/fapi/v1/klines"
+    params = {
+        "symbol": symbol,
+        "interval": interval,
+        "limit": limit
+    }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Error fetching historical data: {response.status_code}")
+        return None
+
 async def connect_to_binance_futures():
     uri = f"wss://fstream.binance.com/stream?streams={'/'.join([pair.lower() + '@kline_' + Timeframe for pair in Pairs])}"
+
+    # Fetch historical data before connecting to WebSocket
+    for pair in Pairs:
+        historical_data = get_historical_klines(pair, Timeframe)
+        if historical_data:
+            for kline in historical_data:
+                close_price = float(kline[4])
+                strategy.close_prices[pair].append(close_price)
+            print(f"Fetched {len(historical_data)} historical data points for {pair}")
 
     async with websockets.connect(uri) as websocket:
         print("Connected to Binance Futures WebSocket")
