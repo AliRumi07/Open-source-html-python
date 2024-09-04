@@ -113,7 +113,7 @@ def index():
     '''
     return render_template_string(template, bot_status=strategy.bot_status)
 
-def get_historical_klines(symbol, interval, limit=15):
+def get_historical_klines(symbol, interval, limit=14):
     url = f"https://fapi.binance.com/fapi/v1/klines"
     params = {
         "symbol": symbol,
