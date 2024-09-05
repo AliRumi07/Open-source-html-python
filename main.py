@@ -11,7 +11,7 @@ import subprocess
 import requests
 
 # Customizable variables
-Timeframe = '1m'
+Timeframe = '5m'
 ema_period_5 = 5
 ema_period_15 = 15
 rsi_period = 3
