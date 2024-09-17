@@ -86,7 +86,7 @@ async def main():
     place_order_body = {
         "symbol": symbol,
         "productType": product_type,
-        "marginMode": "isolated",
+        "marginMode": "crossed",
         "marginCoin": margin_coin,
         "size": size,
         "side": side,
