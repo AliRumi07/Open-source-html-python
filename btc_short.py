@@ -20,7 +20,7 @@ product_type = "usdt-futures"
 margin_coin = "SUSDT"
 size = "0.001"  # trade size
 leverage = "1"  # leverage
-side = "buy"  # Change to "sell" for a sell order
+side = "sell"  # Change to "sell" for a sell order
 trade_side = "open"
 order_type = "market"
 
