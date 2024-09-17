@@ -33,8 +33,8 @@ price_precision = {
     # Add more pairs and their respective precisions here
 }
 
-tp_percentage = 0.004  # 0.4%
-sl_percentage = 0.004  # 0.4%
+tp_percentage = 0.003  # 0.3%
+sl_percentage = 0.003  # 0.3%
 
 async def get_symbol_price(symbol):
     async with websockets.connect(ws_uri) as websocket:
