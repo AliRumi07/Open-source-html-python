@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
 from datetime import datetime
 import asyncio
 import websockets
@@ -11,31 +10,32 @@ import subprocess
 import requests
 
 # Customizable variables
-Timeframe = '5m'
-ema_period_5 = 5
-ema_period_15 = 15
-rsi_period = 3
-rsi_overbought = 70
-rsi_oversold = 30
+Timeframe = '1m'
+williams_period = 14
+williams_threshold = -50
 
 # Add the Pair variable
 Pairs = ["BTCUSDT"]
 
 app = Flask(__name__)
 
-def calculate_indicators(prices):
-    df = pd.DataFrame(prices, columns=['close'])
-    df['ema_5'] = ta.ema(df['close'], length=ema_period_5)
-    df['ema_15'] = ta.ema(df['close'], length=ema_period_15)
-    df['rsi'] = ta.rsi(df['close'], length=rsi_period)
-    return df.iloc[-1]
+def calculate_williams_r(high, low, close):
+    highest_high = max(high)
+    lowest_low = min(low)
+    williams_r = (highest_high - close[-1]) / (highest_high - lowest_low) * -100
+    return williams_r
+
+def calculate_indicators(data):
+    df = pd.DataFrame(data, columns=['high', 'low', 'close'])
+    williams_r = calculate_williams_r(df['high'], df['low'], df['close'])
+    return williams_r
 
 class TradingStrategy:
     def __init__(self, pairs):
         self.pairs = pairs
-        self.close_prices = {pair: [] for pair in pairs}
+        self.price_data = {pair: [] for pair in pairs}
         self.bot_status = "Bot is running..."
-        self.previous_candle_color = {pair: None for pair in pairs}
+        self.previous_williams_r = {pair: None for pair in pairs}
 
     def run_bnb_long(self):
         try:
@@ -53,38 +53,26 @@ class TradingStrategy:
 
     def process_price(self, pair, timestamp, open_price, high_price, low_price, close_price, volume, is_closed):
         if is_closed:
-            self.close_prices[pair].append(close_price)
-            if len(self.close_prices[pair]) > ema_period_15:
-                self.close_prices[pair] = self.close_prices[pair][-ema_period_15:]
+            self.price_data[pair].append([high_price, low_price, close_price])
+            if len(self.price_data[pair]) > williams_period:
+                self.price_data[pair] = self.price_data[pair][-williams_period:]
 
-            # Determine current candle color
-            current_candle_color = 'green' if close_price > open_price else 'red'
+            if len(self.price_data[pair]) == williams_period:
+                williams_r = calculate_indicators(self.price_data[pair])
 
-            if len(self.close_prices[pair]) == ema_period_15:
-                indicators = calculate_indicators(self.close_prices[pair])
-                ema_5 = indicators['ema_5']
-                ema_15 = indicators['ema_15']
-                rsi = indicators['rsi']
-
-                # Check if this is the first candle of a new color
-                if current_candle_color != self.previous_candle_color[pair]:
-                    if self.check_long_entry(ema_5, ema_15, rsi) and current_candle_color == 'green':
+                if self.previous_williams_r[pair] is not None:
+                    if self.check_long_entry(williams_r):
                         self.run_bnb_long()
-                    elif self.check_short_entry(ema_5, ema_15, rsi) and current_candle_color == 'red':
+                    elif self.check_short_entry(williams_r):
                         self.run_bnb_short()
 
-            # Update previous candle color
-            self.previous_candle_color[pair] = current_candle_color
+                self.previous_williams_r[pair] = williams_r
 
-    def check_long_entry(self, ema_5, ema_15, rsi):
-        if ema_5 > ema_15 and rsi > rsi_overbought:
-            return True
-        return False
+    def check_long_entry(self, williams_r):
+        return self.previous_williams_r[Pairs[0]] <= williams_threshold and williams_r > williams_threshold
 
-    def check_short_entry(self, ema_5, ema_15, rsi):
-        if ema_5 < ema_15 and rsi < rsi_oversold:
-            return True
-        return False
+    def check_short_entry(self, williams_r):
+        return self.previous_williams_r[Pairs[0]] >= williams_threshold and williams_r < williams_threshold
 
 strategy = TradingStrategy(Pairs)
 
@@ -135,8 +123,10 @@ async def connect_to_binance_futures():
         historical_data = get_historical_klines(pair, Timeframe)
         if historical_data:
             for kline in historical_data:
+                high_price = float(kline[2])
+                low_price = float(kline[3])
                 close_price = float(kline[4])
-                strategy.close_prices[pair].append(close_price)
+                strategy.price_data[pair].append([high_price, low_price, close_price])
             print(f"Fetched {len(historical_data)} historical data points for {pair}")
 
     async with websockets.connect(uri) as websocket:
