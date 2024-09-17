@@ -15,8 +15,8 @@ Timeframe = '5m'
 ema_period_5 = 5
 ema_period_15 = 15
 rsi_period = 3
-rsi_overbought = 60
-rsi_oversold = 40
+rsi_overbought = 70
+rsi_oversold = 30
 
 # Add the Pair variable
 Pairs = ["BTCUSDT"]
