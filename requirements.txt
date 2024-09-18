@@ -1,5 +1,6 @@
 flask
 websockets
 requests
-numpy
+numpy==1.23.5
 pandas
+pandas-ta
