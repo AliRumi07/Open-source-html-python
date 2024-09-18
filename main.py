@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pandas_ta as ta
 from datetime import datetime
 import asyncio
 import websockets
@@ -19,16 +20,10 @@ Pairs = ["BTCUSDT"]
 
 app = Flask(__name__)
 
-def calculate_williams_r(high, low, close):
-    highest_high = max(high)
-    lowest_low = min(low)
-    williams_r = (highest_high - close[-1]) / (highest_high - lowest_low) * -100
-    return williams_r
-
 def calculate_indicators(data):
     df = pd.DataFrame(data, columns=['high', 'low', 'close'])
-    williams_r = calculate_williams_r(df['high'], df['low'], df['close'])
-    return williams_r
+    df['williams_r'] = ta.williams_r(df['high'], df['low'], df['close'], length=williams_period)
+    return df.iloc[-1]
 
 class TradingStrategy:
     def __init__(self, pairs):
@@ -58,7 +53,8 @@ class TradingStrategy:
                 self.price_data[pair] = self.price_data[pair][-williams_period:]
 
             if len(self.price_data[pair]) == williams_period:
-                williams_r = calculate_indicators(self.price_data[pair])
+                indicators = calculate_indicators(self.price_data[pair])
+                williams_r = indicators['williams_r']
 
                 if self.previous_williams_r[pair] is not None:
                     if self.check_long_entry(williams_r):
