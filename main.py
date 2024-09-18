@@ -22,7 +22,7 @@ app = Flask(__name__)
 
 def calculate_indicators(data):
     df = pd.DataFrame(data, columns=['high', 'low', 'close'])
-    df['williams_r'] = ta.williams_r(df['high'], df['low'], df['close'], length=williams_period)
+    df['williams_r'] = ta.willr(df['high'], df['low'], df['close'], length=williams_period)
     return df.iloc[-1]
 
 class TradingStrategy:
