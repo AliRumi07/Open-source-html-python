@@ -9,7 +9,7 @@ def hello_world():
     <html>
         <head>
             <title>Hello World</title>
-            <meta name="monetag" content="28bdb88b7f13425e46d71c217b4dcaf1">
+            <meta name="monetag" content="61ddc905b0747014cd45a71f3112eb4b">
             <style>
                 body {
                     display: flex;
