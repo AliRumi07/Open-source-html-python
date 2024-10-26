@@ -65,7 +65,7 @@ pubmatic.com, 162882, RESELLER, 5d62403b186f2ace
 pubmatic.com, 162968, RESELLER, 5d62403b186f2ace
 pubmatic.com, 163319, RESELLER, 5d62403b186f2ace
 pubmatic.com, 164119, RESELLER, 5d62403b186f2ace
-pubmatic.com, 164532, RESELLER, 5d62403b186f2
+pubmatic.com, 164532, RESELLER
 pubmatic.com, 164601, RESELLER, 5d62403b186f2ace
 pubmatic.com, 165116, RESELLER, 5d62403b186f2ace
 pubnative.net, 1006955, RESELLER, d641df8625486a7b
@@ -127,3 +127,5 @@ xapads.com, 117219, RESELLER
 yeahmobi.com, 5135195, RESELLER
 zmaticoo.com, 5135195, RESELLER
 zmaticoo.com, 5135704, RESELLER
+tappx.com, r85a45f0, DIRECT, 9f375a07da0318ec
+pubmatic.com, 164532, RESELLER, 5d62403b186f2
