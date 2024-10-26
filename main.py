@@ -10,30 +10,13 @@ html_template = '''
 <!DOCTYPE html>
 <html>
 <head>
+    <meta http-equiv="refresh" content="300">
     <title>Auto Refresh Page</title>
-    <script type="text/javascript">
-        // Function to refresh the page after 10 seconds
-        function startRefresh() {
-            setTimeout(function() {
-                location.reload();
-            }, 60000); // 60000 milliseconds = 1 minute
-        }
-
-        // Start the refresh after 10 seconds
-        setTimeout(startRefresh, 10000); // 10000 milliseconds = 10 seconds
-    </script>
 </head>
 <body>
-    <script type="text/javascript">
-        atOptions = {
-            'key' : 'b67bc9dfe217891d4f52e22e6d0b0b71',
-            'format' : 'iframe',
-            'height' : 60,
-            'width' : 468,
-            'params' : {}
-        };
-    </script>
-    <script type="text/javascript" src="//www.highperformanceformat.com/b67bc9dfe217891d4f52e22e6d0b0b71/invoke.js"></script>
+    <script async type="application/javascript" src="https://a.magsrv.com/ad-provider.js"></script> 
+    <ins class="eas6a97888e2" data-zoneid="5455326"></ins> 
+    <script>(AdProvider = window.AdProvider || []).push({"serve": {}});</script>
 </body>
 </html>
 '''
