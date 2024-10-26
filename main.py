@@ -13,7 +13,7 @@ html_template = '''
 <!DOCTYPE html>
 <html>
 <head>
-    <meta http-equiv="refresh" content="60">
+    <meta http-equiv="refresh" content="300">
     <title>Auto Refresh Page</title>
 </head>
 <body>
