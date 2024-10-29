@@ -6,16 +6,34 @@ html_template = '''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Home</title>
+    <title>Centered Banner</title>
+    <script id="aclib" type="text/javascript" src="//acscdn.com/script/aclib.js"></script>
+    <style>
+        .banner-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+    </style>
 </head>
 <body>
-    <!-- Bidvertiser2096141 -->
+    <div class="banner-container">
+        <div>
+            <script type="text/javascript">
+                aclib.runBanner({
+                    zoneId: '8949742',
+                });
+            </script>
+        </div>
+    </div>
 </body>
 </html>
 '''
 
 @app.route('/')
-def index():
+def hello_world():
     return render_template_string(html_template)
 
 if __name__ == '__main__':
