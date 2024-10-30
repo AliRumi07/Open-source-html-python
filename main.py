@@ -7,6 +7,7 @@ html_template = '''
 <html>
 <head>
     <title>Centered Content</title>
+    <meta name="monetag" content="a3a439a786f9e23dbf22ef8b67a94837">
     <script id="aclib" type="text/javascript" src="//acscdn.com/script/aclib.js"></script>
     <style>
         body {
