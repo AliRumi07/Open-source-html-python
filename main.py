@@ -6,27 +6,29 @@ html_template = '''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Centered Banner</title>
+    <title>Centered Content</title>
     <script id="aclib" type="text/javascript" src="//acscdn.com/script/aclib.js"></script>
     <style>
-        .banner-container {
+        body {
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
-            margin: 0;
+        }
+        .content {
+            text-align: center;
         }
     </style>
 </head>
 <body>
-    <div class="banner-container">
-        <div>
-            <script type="text/javascript">
-                aclib.runBanner({
-                    zoneId: '8949742',
-                });
-            </script>
-        </div>
+    <div class="content">
+        <script type="text/javascript">
+            aclib.runAutoTag({
+                zoneId: 'xzqj5qrw84',
+            });
+        </script>
     </div>
 </body>
 </html>
