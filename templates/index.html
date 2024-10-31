@@ -3,84 +3,74 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple HTML Page</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f7f7f6;
-            color: #333;
-        }
-        header {
-            background-color: #3c8dbc;
-            color: white;
-            padding: 10px 0;
-            text-align: center;
-        }
-        main {
-            margin-top: 20px;
-        }
-    </style>
+    <meta name="6a97888e-site-verification" content="ac06b0b13a17a6ae4905e2dc8cabe011">
+    <title>Crypto Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <header>
-        <h1>Welcome to My Simple Page</h1>
+
+    <!-- Header Section -->
+    <header class="header">
+        <h1>Crypto Dashboard</h1>
+        <p>Your one-stop platform for cryptocurrency news and market data.</p>
     </header>
-    <main>
-        <p>This is a simple HTML page that includes several JavaScript snippets.</p>
-    </main>
 
-    <script>
-        (function(i,n,t,s,t,l){
-            i.intstl = i.intstl || function() {
-                (i.intstl.q=(i.intstl.q||[])).push(arguments)
-            };
-            var s=n.getElementsByTagName('head')[0];
-            var q=n.createElement('script'); q.async=1;
-            q.src='https://static.ezmob.com/intstl/intstl.js';
-            s.appendChild(q);
-            i.intstl('init', {
-                host: 'xml.qualiclicks.com',
-                feed: 722168,
-                auth : 'LjzA',
-                logo: 'https://adk.ezmob.com/images/icoLogo.png',
-                color1: '#3c8dbc', color2: '#307196',
-                textColor: 'white', background: '#f7f7f6',
-                engagementPeriod: 10,
-                interval: 11,
-                defer: 10
-            });
-            i.intstl('show');
-        })(window, document);
-    </script>
+    <!-- Hero Section -->
+    <section class="hero">
+        <h2>Welcome to the World of Crypto!</h2>
+        <p>Get real-time insights, track market trends, and stay updated with the latest news.</p>
+    </section>
 
-    <script type="application/javascript">
-        (function() {
-            //version 2.0.0
-            var adConfig = {
-                "ads_host": "a.pemsrv.com",
-                "syndication_host": "s.pemsrv.com",
-                "idzone": 5460102,
-                "popup_fallback": false,
-                "popup_force": false,
-                "chrome_enabled": true,
-                "new_tab": false,
-                "frequency_period": 720,
-                "frequency_count": 1,
-                "trigger_method": 1,
-                "trigger_class": "",
-                "trigger_delay": 0,
-                "capping_enabled": false,
-                "only_inline": false
-            };
+    <!-- Market Overview Section -->
+    <section class="market-overview">
+        <h2>Market Overview</h2>
+        <div class="market-grid">
+            <!-- Placeholder for Market Data -->
+            <div class="crypto-card">
+                <h3>Bitcoin (BTC)</h3>
+                <p>Price: $34,000</p>
+                <p>Market Cap: $700B</p>
+                <p>24h Change: +2.5%</p>
+            </div>
+            <div class="crypto-card">
+                <h3>Ethereum (ETH)</h3>
+                <p>Price: $2,000</p>
+                <p>Market Cap: $250B</p>
+                <p>24h Change: +1.8%</p>
+            </div>
+            <div class="crypto-card">
+                <h3>Cardano (ADA)</h3>
+                <p>Price: $1.20</p>
+                <p>Market Cap: $40B</p>
+                <p>24h Change: +3.1%</p>
+            </div>
+        </div>
+    </section>
 
-            window.document.querySelectorAll||(document.querySelectorAll=document.body.querySelectorAll=Object.querySelectorAll=function(e,o,t,i,n){var r=document,a=r.createStyleSheet();for(n=r.all,o=[],t=(e=e.replace(/\[for\b/gi,"[htmlFor").split(",")).length;t--;){for(a.addRule(e[t],"k:v"),i=n.length;i--;)n[i].currentStyle.k&&o.push(n[i]);a.removeRule(0)}return o});
-            
-            var popMagic={/* (The full content of popMagic remains unchanged) */};
+    <!-- Latest News Section -->
+    <section class="news">
+        <h2>Latest Crypto News</h2>
+        <ul class="news-list">
+            <li>
+                <a href="#" target="_blank">Bitcoin reaches new all-time high as institutional adoption increases.</a>
+                <span>Oct 30, 2024</span>
+            </li>
+            <li>
+                <a href="#" target="_blank">Ethereum 2.0 upgrade expected to reduce energy consumption by 99.95%.</a>
+                <span>Oct 28, 2024</span>
+            </li>
+            <li>
+                <a href="#" target="_blank">Cardano announces new partnership with African nations to drive adoption.</a>
+                <span>Oct 27, 2024</span>
+            </li>
+        </ul>
+    </section>
 
-            popMagic.init(adConfig);
-        })();
-    </script>
+    <!-- Footer Section -->
+    <footer class="footer">
+        <p>&copy; 2024 Crypto Dashboard. All rights reserved.</p>
+        <p>Disclaimer: Cryptocurrency is highly volatile. Please invest wisely.</p>
+    </footer>
+
 </body>
 </html>
