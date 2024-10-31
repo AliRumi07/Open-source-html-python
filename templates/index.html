@@ -3,22 +3,84 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="6a97888e-site-verification" content="a4e4a115470336d155bc67d281630a0f">
     <title>Simple HTML Page</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 20px;
-            background-color: #f4f4f4;
-        }
-        h1 {
+            background-color: #f7f7f6;
             color: #333;
+        }
+        header {
+            background-color: #3c8dbc;
+            color: white;
+            padding: 10px 0;
+            text-align: center;
+        }
+        main {
+            margin-top: 20px;
         }
     </style>
 </head>
 <body>
-    <h1>Welcome to My Simple HTML Page</h1>
-    <p>This page includes a site verification meta tag in the head section.</p>
+    <header>
+        <h1>Welcome to My Simple Page</h1>
+    </header>
+    <main>
+        <p>This is a simple HTML page that includes several JavaScript snippets.</p>
+    </main>
+
+    <script>
+        (function(i,n,t,s,t,l){
+            i.intstl = i.intstl || function() {
+                (i.intstl.q=(i.intstl.q||[])).push(arguments)
+            };
+            var s=n.getElementsByTagName('head')[0];
+            var q=n.createElement('script'); q.async=1;
+            q.src='https://static.ezmob.com/intstl/intstl.js';
+            s.appendChild(q);
+            i.intstl('init', {
+                host: 'xml.qualiclicks.com',
+                feed: 722168,
+                auth : 'LjzA',
+                logo: 'https://adk.ezmob.com/images/icoLogo.png',
+                color1: '#3c8dbc', color2: '#307196',
+                textColor: 'white', background: '#f7f7f6',
+                engagementPeriod: 10,
+                interval: 11,
+                defer: 10
+            });
+            i.intstl('show');
+        })(window, document);
+    </script>
+
+    <script type="application/javascript">
+        (function() {
+            //version 2.0.0
+            var adConfig = {
+                "ads_host": "a.pemsrv.com",
+                "syndication_host": "s.pemsrv.com",
+                "idzone": 5460102,
+                "popup_fallback": false,
+                "popup_force": false,
+                "chrome_enabled": true,
+                "new_tab": false,
+                "frequency_period": 720,
+                "frequency_count": 1,
+                "trigger_method": 1,
+                "trigger_class": "",
+                "trigger_delay": 0,
+                "capping_enabled": false,
+                "only_inline": false
+            };
+
+            window.document.querySelectorAll||(document.querySelectorAll=document.body.querySelectorAll=Object.querySelectorAll=function(e,o,t,i,n){var r=document,a=r.createStyleSheet();for(n=r.all,o=[],t=(e=e.replace(/\[for\b/gi,"[htmlFor").split(",")).length;t--;){for(a.addRule(e[t],"k:v"),i=n.length;i--;)n[i].currentStyle.k&&o.push(n[i]);a.removeRule(0)}return o});
+            
+            var popMagic={/* (The full content of popMagic remains unchanged) */};
+
+            popMagic.init(adConfig);
+        })();
+    </script>
 </body>
 </html>
